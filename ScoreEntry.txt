@@ -1,0 +1,92 @@
+package com.example.scentmixmaster;
+
+/**
+ * Skor bilgilerini temsil eden model sınıfı
+ */
+public class ScoreEntry {
+    private String playerName;
+    private int score;
+    private String date;
+    private int rank;  // Sıralama bilgisi
+    private String serverId;  // Sunucu ID'si (online senkronizasyon için)
+
+    public ScoreEntry(String playerName, int score, String date) {
+        this.playerName = playerName;
+        this.score = score;
+        this.date = date;
+        this.rank = 0;
+        this.serverId = null;
+    }
+
+    // Sunucu ID'li constructor
+    public ScoreEntry(String playerName, int score, String date, String serverId) {
+        this.playerName = playerName;
+        this.score = score;
+        this.date = date;
+        this.rank = 0;
+        this.serverId = serverId;
+    }
+
+    public String getPlayerName() {
+        return playerName;
+    }
+
+    public void setPlayerName(String playerName) {
+        this.playerName = playerName;
+    }
+
+    public int getScore() {
+        return score;
+    }
+
+    public void setScore(int score) {
+        this.score = score;
+    }
+
+    public String getDate() {
+        return date;
+    }
+
+    public void setDate(String date) {
+        this.date = date;
+    }
+
+    public int getRank() {
+        return rank;
+    }
+
+    public void setRank(int rank) {
+        this.rank = rank;
+    }
+
+    public String getServerId() {
+        return serverId;
+    }
+
+    public void setServerId(String serverId) {
+        this.serverId = serverId;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+
+        ScoreEntry that = (ScoreEntry) o;
+
+        if (score != that.score) return false;
+        if (playerName != null ? !playerName.equals(that.playerName) : that.playerName != null)
+            return false;
+        if (date != null ? !date.equals(that.date) : that.date != null) return false;
+        return serverId != null ? serverId.equals(that.serverId) : that.serverId == null;
+    }
+
+    @Override
+    public int hashCode() {
+        int result = playerName != null ? playerName.hashCode() : 0;
+        result = 31 * result + score;
+        result = 31 * result + (date != null ? date.hashCode() : 0);
+        result = 31 * result + (serverId != null ? serverId.hashCode() : 0);
+        return result;
+    }
+}

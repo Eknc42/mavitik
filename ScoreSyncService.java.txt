@@ -1,0 +1,355 @@
+package com.example.scentmixmaster;
+
+import android.content.Context;
+import android.content.SharedPreferences;
+import android.util.Log;
+import android.widget.Toast;
+
+import com.google.gson.Gson;
+import com.google.gson.reflect.TypeToken;
+
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import java.io.IOException;
+import java.lang.reflect.Type;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.TimeUnit;
+
+import okhttp3.Call;
+import okhttp3.Callback;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
+
+public class ScoreSyncService {
+    private static final String TAG = "ScoreSyncService";
+    private static final String BASE_URL = "https://your-api-endpoint.com/api/scores"; // Sunucu URL'nizi buraya ekleyin
+    private static final String LOCAL_SCORES_PREFS = "HighScoresPrefs";
+    private static final String KEY_SCORES = "scores";
+    private static final String KEY_LAST_SYNC = "last_sync_time";
+    private static final String PENDING_UPLOADS_PREFS = "PendingUploadsPrefs";
+    private static final String KEY_PENDING_UPLOADS = "pending_uploads";
+    
+    private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
+    private static final OkHttpClient client = new OkHttpClient.Builder()
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
+            .build();
+    
+    // Singleton instance
+    private static ScoreSyncService instance;
+    
+    private ScoreSyncService() {
+        // Private constructor for singleton
+    }
+    
+    public static ScoreSyncService getInstance() {
+        if (instance == null) {
+            instance = new ScoreSyncService();
+        }
+        return instance;
+    }
+    
+    /**
+     * Yeni bir skoru sunucuya yükle ve lokalde sakla
+     */
+    public void addScore(Context context, final int score, final String playerName) {
+        // Yeni skor oluştur
+        final ScoreEntry newScore = new ScoreEntry(
+                playerName,
+                score,
+                new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(new java.util.Date())
+        );
+        
+        // Skoru yerel olarak hemen kaydet
+        saveScoreLocally(context, newScore);
+        
+        // Skoru sunucuya gönder
+        uploadScoreToServer(context, newScore);
+    }
+    
+    /**
+     * Bir skoru yerel olarak SharedPreferences'e kaydet
+     */
+    private void saveScoreLocally(Context context, ScoreEntry newScore) {
+        SharedPreferences prefs = context.getSharedPreferences(LOCAL_SCORES_PREFS, Context.MODE_PRIVATE);
+        String scoresJson = prefs.getString(KEY_SCORES, "[]");
+        
+        Gson gson = new Gson();
+        Type type = new TypeToken<List<ScoreEntry>>(){}.getType();
+        List<ScoreEntry> scores = gson.fromJson(scoresJson, type);
+        
+        if (scores == null) {
+            scores = new ArrayList<>();
+        }
+        
+        scores.add(newScore);
+        
+        SharedPreferences.Editor editor = prefs.edit();
+        editor.putString(KEY_SCORES, gson.toJson(scores));
+        editor.apply();
+        
+        Log.d(TAG, "Skor yerel olarak kaydedildi: " + newScore.getScore() + " - " + newScore.getPlayerName());
+    }
+    
+    /**
+     * Skoru sunucuya yükle
+     */
+    private void uploadScoreToServer(final Context context, final ScoreEntry score) {
+        try {
+            JSONObject jsonScore = new JSONObject();
+            jsonScore.put("playerName", score.getPlayerName());
+            jsonScore.put("score", score.getScore());
+            jsonScore.put("date", score.getDate());
+            
+            RequestBody body = RequestBody.create(jsonScore.toString(), JSON);
+            Request request = new Request.Builder()
+                    .url(BASE_URL)
+                    .post(body)
+                    .build();
+            
+            client.newCall(request).enqueue(new Callback() {
+                @Override
+                public void onFailure(Call call, IOException e) {
+                    Log.e(TAG, "Skor yükleme başarısız", e);
+                    // Bekleyen yüklemelere ekle
+                    addToPendingUploads(context, score);
+                }
+                
+                @Override
+                public void onResponse(Call call, Response response) throws IOException {
+                    if (!response.isSuccessful()) {
+                        Log.e(TAG, "Sunucu hatası: " + response.code());
+                        // Bekleyen yüklemelere ekle
+                        addToPendingUploads(context, score);
+                        return;
+                    }
+                    
+                    Log.d(TAG, "Skor başarıyla sunucuya yüklendi");
+                }
+            });
+        } catch (JSONException e) {
+            Log.e(TAG, "JSON oluşturma hatası", e);
+            // Bekleyen yüklemelere ekle
+            addToPendingUploads(context, score);
+        }
+    }
+    
+    /**
+     * Sunucuya yüklenememiş skorları bekleyen yüklemeler listesine ekle
+     */
+    private void addToPendingUploads(Context context, ScoreEntry score) {
+        SharedPreferences prefs = context.getSharedPreferences(PENDING_UPLOADS_PREFS, Context.MODE_PRIVATE);
+        String pendingJson = prefs.getString(KEY_PENDING_UPLOADS, "[]");
+        
+        Gson gson = new Gson();
+        Type type = new TypeToken<List<ScoreEntry>>(){}.getType();
+        List<ScoreEntry> pendingUploads = gson.fromJson(pendingJson, type);
+        
+        if (pendingUploads == null) {
+            pendingUploads = new ArrayList<>();
+        }
+        
+        pendingUploads.add(score);
+        
+        SharedPreferences.Editor editor = prefs.edit();
+        editor.putString(KEY_PENDING_UPLOADS, gson.toJson(pendingUploads));
+        editor.apply();
+        
+        Log.d(TAG, "Skor bekleyen yüklemelere eklendi");
+    }
+    
+    /**
+     * Bekleyen yüklemeleri sunucuya göndermeyi dene
+     */
+    public void syncPendingUploads(final Context context) {
+        SharedPreferences prefs = context.getSharedPreferences(PENDING_UPLOADS_PREFS, Context.MODE_PRIVATE);
+        String pendingJson = prefs.getString(KEY_PENDING_UPLOADS, "[]");
+        
+        Gson gson = new Gson();
+        Type type = new TypeToken<List<ScoreEntry>>(){}.getType();
+        final List<ScoreEntry> pendingUploads = gson.fromJson(pendingJson, type);
+        
+        if (pendingUploads == null || pendingUploads.isEmpty()) {
+            return;
+        }
+        
+        Log.d(TAG, pendingUploads.size() + " bekleyen yükleme bulundu");
+        
+        // Her bekleyen skoru sunucuya yükle
+        for (final ScoreEntry pendingScore : new ArrayList<>(pendingUploads)) {
+            try {
+                JSONObject jsonScore = new JSONObject();
+                jsonScore.put("playerName", pendingScore.getPlayerName());
+                jsonScore.put("score", pendingScore.getScore());
+                jsonScore.put("date", pendingScore.getDate());
+                
+                RequestBody body = RequestBody.create(jsonScore.toString(), JSON);
+                Request request = new Request.Builder()
+                        .url(BASE_URL)
+                        .post(body)
+                        .build();
+                
+                client.newCall(request).enqueue(new Callback() {
+                    @Override
+                    public void onFailure(Call call, IOException e) {
+                        Log.e(TAG, "Bekleyen skor yükleme başarısız", e);
+                    }
+                    
+                    @Override
+                    public void onResponse(Call call, Response response) throws IOException {
+                        if (response.isSuccessful()) {
+                            Log.d(TAG, "Bekleyen skor başarıyla yüklendi");
+                            // Başarıyla yüklenen skoru listeden kaldır
+                            removePendingUpload(context, pendingScore);
+                        }
+                    }
+                });
+            } catch (JSONException e) {
+                Log.e(TAG, "JSON oluşturma hatası", e);
+            }
+        }
+    }
+    
+    /**
+     * Başarıyla yüklenmiş bir skoru bekleyen yüklemeler listesinden kaldır
+     */
+    private void removePendingUpload(Context context, ScoreEntry score) {
+        SharedPreferences prefs = context.getSharedPreferences(PENDING_UPLOADS_PREFS, Context.MODE_PRIVATE);
+        String pendingJson = prefs.getString(KEY_PENDING_UPLOADS, "[]");
+        
+        Gson gson = new Gson();
+        Type type = new TypeToken<List<ScoreEntry>>(){}.getType();
+        List<ScoreEntry> pendingUploads = gson.fromJson(pendingJson, type);
+        
+        if (pendingUploads == null || pendingUploads.isEmpty()) {
+            return;
+        }
+        
+        // Skoru bulup kaldır
+        for (int i = 0; i < pendingUploads.size(); i++) {
+            ScoreEntry entry = pendingUploads.get(i);
+            if (entry.getPlayerName().equals(score.getPlayerName()) &&
+                    entry.getScore() == score.getScore() &&
+                    entry.getDate().equals(score.getDate())) {
+                pendingUploads.remove(i);
+                break;
+            }
+        }
+        
+        // Güncellenmiş listeyi kaydet
+        SharedPreferences.Editor editor = prefs.edit();
+        editor.putString(KEY_PENDING_UPLOADS, gson.toJson(pendingUploads));
+        editor.apply();
+    }
+    
+    /**
+     * Sunucudan skor listesini getir
+     */
+    public void fetchScores(final Context context, final OnScoresFetchedListener listener) {
+        Request request = new Request.Builder()
+                .url(BASE_URL)
+                .get()
+                .build();
+        
+        client.newCall(request).enqueue(new Callback() {
+            @Override
+            public void onFailure(Call call, IOException e) {
+                Log.e(TAG, "Skor getirme başarısız", e);
+                
+                // Bağlantı hatası durumunda yerel skorları kullan
+                deliverLocalScores(context, listener);
+            }
+            
+            @Override
+            public void onResponse(Call call, Response response) throws IOException {
+                if (!response.isSuccessful()) {
+                    Log.e(TAG, "Sunucu hatası: " + response.code());
+                    deliverLocalScores(context, listener);
+                    return;
+                }
+                
+                try {
+                    String responseData = response.body().string();
+                    JSONArray jsonArray = new JSONArray(responseData);
+                    List<ScoreEntry> scores = new ArrayList<>();
+                    
+                    for (int i = 0; i < jsonArray.length(); i++) {
+                        JSONObject jsonScore = jsonArray.getJSONObject(i);
+                        ScoreEntry score = new ScoreEntry(
+                                jsonScore.getString("playerName"),
+                                jsonScore.getInt("score"),
+                                jsonScore.getString("date")
+                        );
+                        scores.add(score);
+                    }
+                    
+                    // Skorları güncelle ve bildirim yap
+                    updateLocalScores(context, scores);
+                    notifyScoresFetched(listener, scores);
+                    
+                } catch (Exception e) {
+                    Log.e(TAG, "JSON parse hatası", e);
+                    deliverLocalScores(context, listener);
+                }
+            }
+        });
+    }
+    
+    /**
+     * Yerel skorları dinleyiciye ilet
+     */
+    private void deliverLocalScores(Context context, OnScoresFetchedListener listener) {
+        SharedPreferences prefs = context.getSharedPreferences(LOCAL_SCORES_PREFS, Context.MODE_PRIVATE);
+        String scoresJson = prefs.getString(KEY_SCORES, "[]");
+        
+        Gson gson = new Gson();
+        Type type = new TypeToken<List<ScoreEntry>>(){}.getType();
+        final List<ScoreEntry> scores = gson.fromJson(scoresJson, type);
+        
+        notifyScoresFetched(listener, scores != null ? scores : new ArrayList<ScoreEntry>());
+    }
+    
+    /**
+     * Sunucudan alınan skorları yerel olarak güncelle
+     */
+    private void updateLocalScores(Context context, List<ScoreEntry> scores) {
+        SharedPreferences prefs = context.getSharedPreferences(LOCAL_SCORES_PREFS, Context.MODE_PRIVATE);
+        SharedPreferences.Editor editor = prefs.edit();
+        
+        Gson gson = new Gson();
+        editor.putString(KEY_SCORES, gson.toJson(scores));
+        editor.putLong(KEY_LAST_SYNC, System.currentTimeMillis());
+        editor.apply();
+        
+        Log.d(TAG, "Yerel skorlar güncellendi, toplam: " + scores.size());
+    }
+    
+    /**
+     * Dinleyiciye skorları bildir
+     */
+    private void notifyScoresFetched(final OnScoresFetchedListener listener, final List<ScoreEntry> scores) {
+        if (listener != null) {
+            android.os.Handler mainHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+            mainHandler.post(new Runnable() {
+                @Override
+                public void run() {
+                    listener.onScoresFetched(scores);
+                }
+            });
+        }
+    }
+    
+    /**
+     * Skore getirme işlemine dinleyici arayüzü
+     */
+    public interface OnScoresFetchedListener {
+        void onScoresFetched(List<ScoreEntry> scores);
+    }
+}

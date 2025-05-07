@@ -1,0 +1,739 @@
+package com.example.scentmixmaster;
+
+import androidx.appcompat.app.AppCompatActivity;
+import android.content.SharedPreferences;
+import android.media.MediaPlayer;
+import android.os.Bundle;
+import android.view.MotionEvent;
+import android.view.View;
+import android.widget.Button;
+import android.widget.ImageView;
+import android.widget.ProgressBar;
+import android.widget.TextView;
+import android.widget.Toast;
+import android.animation.ObjectAnimator;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Random;
+import androidx.appcompat.app.AlertDialog;
+import android.widget.EditText;
+
+import android.util.Log;
+
+
+
+public class MainActivity extends AppCompatActivity {
+
+
+    // UI Bileşenleri
+    private TextView levelTextView;
+    private TextView scoreTextView;
+    private TextView customerRequestTextView;
+    private TextView timeTextView;
+    private TextView[] ingredientValueTextViews;
+    private TextView[] ingredientNameTextViews;
+    private Button mixButton;
+    private ProgressBar timerProgressBar;
+
+    // Parfüm Şişesi Bileşenleri
+    private ImageView mainBottleImageView;
+    private ImageView[] ingredientBottleImageViews;
+    private ProgressBar[] ingredientFillLevels;
+    private ProgressBar mainBottleFillLevel;
+
+    // Ses Değişkenleri
+    private MediaPlayer backgroundMusicPlayer;
+    private MediaPlayer levelCompleteSound;
+    private MediaPlayer timeUpSound;
+    private MediaPlayer pourSound;
+    private boolean isMusicEnabled = true;
+    private float musicVolume = 0.5f;
+
+    // Oyun Değişkenleri
+    private int currentLevel = 1;
+    private int score = 0;
+    private int timeRemaining = 60;
+    private boolean isGameActive = false;
+    private boolean timerRunning = false;
+    private Random random = new Random();
+    private Thread timerThread;
+
+    // Şişe Doldurma Değişkenleri
+    private boolean[] isBottleTouched;
+    private float[] currentIngredientValues;
+    private float mainBottleFillValue = 0f;
+
+    // SharedPreferences
+    public static final String PREFS_NAME = "ScentMixMasterPrefs";
+    private static final String KEY_LEVEL = "level";
+    private static final String KEY_SCORE = "score";
+
+    // Oyun Verileri
+    private Map<String, Float> currentMixture = new HashMap<>();
+    private Map<String, Float> requestedMixture = new HashMap<>();
+    private Map<String, Float> previousRequestedMixture = new HashMap<>();
+    private List<String> availableIngredients = new ArrayList<>();
+    private final List<String> currentLevelIngredients = new ArrayList<>();
+    private final List<String> previousLevelIngredients = new ArrayList<>();
+    private String previousCustomerRequest = "";
+    private static final String PLAYER_NAME_PREF = "PlayerNamePref";
+    private static final String KEY_PLAYER_NAME = "player_name";
+    private String playerName;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
+        checkPlayerName();
+
+
+        initializeViews();
+        loadSavedGame();
+        loadSettings(); // Ayarları yükle
+        initializeGame();
+        setupListeners();
+        initializeSounds();
+    }
+
+    private void loadSettings() {
+        SharedPreferences settings = getSharedPreferences(SettingsActivity.SETTINGS_PREFS, MODE_PRIVATE);
+
+        // Müzik ayarları
+        isMusicEnabled = settings.getBoolean(SettingsActivity.KEY_BACKGROUND_MUSIC, true);
+        musicVolume = settings.getInt(SettingsActivity.KEY_MUSIC_VOLUME, 50) / 100f;
+
+        // Ses efektleri için ses seviyesi
+        float effectsVolume = settings.getInt(SettingsActivity.KEY_EFFECTS_VOLUME, 50) / 100f;
+        boolean soundEffectsEnabled = settings.getBoolean(SettingsActivity.KEY_SOUND_EFFECTS, true);
+
+        // Ses ayarlarını uygula
+        if (backgroundMusicPlayer != null) {
+            backgroundMusicPlayer.setVolume(musicVolume, musicVolume);
+            if (isMusicEnabled) {
+                backgroundMusicPlayer.start();
+            } else {
+                backgroundMusicPlayer.pause();
+            }
+        }
+
+        // Ses efektleri için ses seviyesini ayarla
+        if (soundEffectsEnabled) {
+            if (levelCompleteSound != null) levelCompleteSound.setVolume(effectsVolume, effectsVolume);
+            if (timeUpSound != null) timeUpSound.setVolume(effectsVolume, effectsVolume);
+            if (pourSound != null) pourSound.setVolume(effectsVolume, effectsVolume);
+        } else {
+            if (levelCompleteSound != null) levelCompleteSound.setVolume(0, 0);
+            if (timeUpSound != null) timeUpSound.setVolume(0, 0);
+            if (pourSound != null) pourSound.setVolume(0, 0);
+        }
+
+        // Zorluk seviyesi ayarlarını uygula
+        String difficulty = settings.getString(SettingsActivity.KEY_DIFFICULTY, "normal");
+        adjustDifficultySettings(difficulty);
+    }
+
+    private void adjustDifficultySettings(String difficulty) {
+        switch (difficulty) {
+            case "easy":
+                // Kolay mod ayarları
+                timeRemaining = Math.max(45, 75 - (currentLevel * 2)); // Daha fazla süre
+                break;
+            case "hard":
+                // Zor mod ayarları
+                timeRemaining = Math.max(20, 45 - (currentLevel * 2)); // Daha az süre
+                break;
+            default:
+                // Normal mod ayarları (mevcut mantık)
+                timeRemaining = Math.max(30, 60 - (currentLevel * 2));
+                break;
+        }
+    }
+
+    private void initializeSounds() {
+        try {
+            // Arkaplan müziği
+            backgroundMusicPlayer = MediaPlayer.create(this, R.raw.background_music);
+            if (backgroundMusicPlayer != null) {
+                backgroundMusicPlayer.setLooping(true);
+                backgroundMusicPlayer.setVolume(musicVolume, musicVolume);
+                backgroundMusicPlayer.start();
+            }
+
+            // Level tamamlama sesi
+            levelCompleteSound = MediaPlayer.create(this, R.raw.level_complete);
+            if (levelCompleteSound != null) {
+                levelCompleteSound.setVolume(1.0f, 1.0f);
+            }
+
+            // Süre bitimi sesi
+            timeUpSound = MediaPlayer.create(this, R.raw.time_up);
+            if (timeUpSound != null) {
+                timeUpSound.setVolume(1.0f, 1.0f);
+            }
+
+            // Dökme sesi
+            pourSound = MediaPlayer.create(this, R.raw.pouring_sound);
+            if (pourSound != null) {
+                pourSound.setVolume(1.0f, 1.0f);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+            Toast.makeText(this, "Ses dosyaları yüklenemedi", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void playPourSound() {
+        if (pourSound != null && !pourSound.isPlaying()) {
+            try {
+                pourSound.seekTo(0);
+                pourSound.start();
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    private void playLevelCompleteSound() {
+        if (levelCompleteSound != null) {
+            try {
+                levelCompleteSound.seekTo(0);
+                levelCompleteSound.start();
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    private void playTimeUpSound() {
+        if (timeUpSound != null) {
+            try {
+                timeUpSound.seekTo(0);
+                timeUpSound.start();
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    private void initializeViews() {
+        levelTextView = findViewById(R.id.levelTextView);
+        scoreTextView = findViewById(R.id.scoreTextView);
+        customerRequestTextView = findViewById(R.id.customerRequestTextView);
+        timeTextView = findViewById(R.id.timeTextView);
+        mixButton = findViewById(R.id.mixButton);
+        timerProgressBar = findViewById(R.id.timerProgressBar);
+
+        // Ana şişe bileşeni
+        mainBottleImageView = findViewById(R.id.mainBottleImageView);
+        mainBottleFillLevel = findViewById(R.id.mainBottleFillLevel);
+
+        // Malzeme şişeleri için diziler
+        ingredientValueTextViews = new TextView[5];
+        ingredientNameTextViews = new TextView[5];
+        ingredientBottleImageViews = new ImageView[5];
+        ingredientFillLevels = new ProgressBar[5];
+        isBottleTouched = new boolean[5];
+        currentIngredientValues = new float[5];
+
+        for(int i = 0; i < 5; i++) {
+            String valueId = "ingredientValue" + (i+1);
+            String nameId = "ingredientName" + (i+1);
+            String bottleId = "ingredientBottle" + (i+1);
+            String fillLevelId = "ingredientFillLevel" + (i+1);
+
+            ingredientValueTextViews[i] = findViewById(getResources().getIdentifier(valueId, "id", getPackageName()));
+            ingredientNameTextViews[i] = findViewById(getResources().getIdentifier(nameId, "id", getPackageName()));
+            ingredientBottleImageViews[i] = findViewById(getResources().getIdentifier(bottleId, "id", getPackageName()));
+            ingredientFillLevels[i] = findViewById(getResources().getIdentifier(fillLevelId, "id", getPackageName()));
+        }
+    }
+    private void checkPlayerName() {
+        SharedPreferences prefs = getSharedPreferences(PLAYER_NAME_PREF,MODE_PRIVATE);
+        playerName = prefs.getString(KEY_PLAYER_NAME, null);
+
+        if (playerName == null || playerName.isEmpty()) {
+            showPlayerNameDialog();
+        }
+    }
+
+    private void showPlayerNameDialog() {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        View view = getLayoutInflater().inflate(R.layout.dialog_player_name, null);
+        final EditText nameInput = view.findViewById(R.id.playerNameEditText);
+
+        builder.setView(view)
+                .setCancelable(false)
+                .setPositiveButton("Kaydet", null)
+                .setTitle("Hoş Geldiniz!");
+
+        final AlertDialog dialog = builder.create();
+
+        dialog.setOnShowListener(dialogInterface -> {
+            Button button = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+            button.setOnClickListener(view1 -> {
+                String name = nameInput.getText().toString().trim();
+                if (name.isEmpty()) {
+                    nameInput.setError("Lütfen bir isim girin");
+                    return;
+                }
+                if (name.length() < 3) {
+                    nameInput.setError("İsim en az 3 karakter olmalı");
+                    return;
+                }
+                savePlayerName(name);
+                dialog.dismiss();
+            });
+        });
+
+        dialog.show();
+    }
+
+    private void savePlayerName(String name) {
+        SharedPreferences prefs = getSharedPreferences(PLAYER_NAME_PREF,MODE_PRIVATE);
+        SharedPreferences.Editor editor = prefs.edit();
+        editor.putString(KEY_PLAYER_NAME, name);
+        editor.apply();
+        playerName = name;
+    }
+
+    private void loadSavedGame() {
+        SharedPreferences settings = getSharedPreferences(PREFS_NAME, 0);
+        currentLevel = settings.getInt(KEY_LEVEL, 1);
+        score = settings.getInt(KEY_SCORE, 0);
+    }
+
+    private void saveGameState() {
+        SharedPreferences settings = getSharedPreferences(PREFS_NAME, 0);
+        SharedPreferences.Editor editor = settings.edit();
+        editor.putInt(KEY_LEVEL, currentLevel);
+        editor.putInt(KEY_SCORE, score);
+        editor.apply();
+    }
+
+    private void initializeGame() {
+        // Tüm mevcut malzemeleri tanımla
+        availableIngredients.add("Lavanta");
+        availableIngredients.add("Gül");
+        availableIngredients.add("Vanilya");
+        availableIngredients.add("Bergamot");
+        availableIngredients.add("Portakal");
+        availableIngredients.add("Sandal Ağacı");
+        availableIngredients.add("Amber");
+        availableIngredients.add("Paçuli");
+        availableIngredients.add("Yasemin");
+        availableIngredients.add("Misk");
+
+        updateLevelUI();
+    }
+
+    private void setupListeners() {
+        for (int i = 0; i < ingredientBottleImageViews.length; i++) {
+            final int index = i;
+
+            ingredientBottleImageViews[i].setOnTouchListener((view, event) -> {
+                if (!isGameActive) return false;
+
+                switch (event.getAction()) {
+                    case MotionEvent.ACTION_DOWN:
+                        isBottleTouched[index] = true;
+                        startPouringAnimation(index);
+                        playPourSound();
+                        return true;
+
+                    case MotionEvent.ACTION_UP:
+                    case MotionEvent.ACTION_CANCEL:
+                        isBottleTouched[index] = false;
+                        stopPouringSound();
+                        return true;
+                }
+                return false;
+            });
+        }
+
+        mixButton.setOnClickListener(v -> {
+            if (isGameActive) {
+                checkMixture();
+            } else {
+                startNewLevel();
+            }
+        });
+    }
+
+    private void startPouringAnimation(int index) {
+        new Thread(() -> {
+            while (isBottleTouched[index] && isGameActive) {
+                // Ana şişeyi doldurmak için maksimum değeri kontrol et
+                if (mainBottleFillValue < 1.0f && currentIngredientValues[index] < 1.0f) {
+                    // Her 100ms'de onda 0.1 artış
+                    float increment = 0.01f;
+                    currentIngredientValues[index] += increment;
+                    mainBottleFillValue += increment;
+
+                    // UI güncelleme
+                    runOnUiThread(() -> {
+                        if (currentIngredientValues[index] > 1.0f) currentIngredientValues[index] = 1.0f;
+                        if (mainBottleFillValue > 1.0f) mainBottleFillValue = 1.0f;
+
+                        // Şişe doluluk animasyonu
+                        updateBottleFillLevels(index);
+
+                        // Değeri string olarak güncelle, onda sistemde (örn: 0.52)
+                        ingredientValueTextViews[index].setText(String.format("%.2f", currentIngredientValues[index]));
+
+                        // Karışım haritasını güncelle
+                        if (currentLevelIngredients.size() > index) {
+                            currentMixture.put(currentLevelIngredients.get(index), currentIngredientValues[index]);
+                        }
+
+                        // Toplam değeri kontrol et
+                        checkTotalValue();
+                    });
+
+                    try {
+                        Thread.sleep(100);
+                    } catch (InterruptedException e) {
+                        break;
+                    }
+                } else {
+                    isBottleTouched[index] = false;
+                    stopPouringSound();
+                    break;
+                }
+            }
+        }).start();
+    }
+
+    private void updateBottleFillLevels(int index) {
+        // Malzeme şişesinin doluluk seviyesini güncelle (0-100)
+        int fillValue = (int)(currentIngredientValues[index] * 100);
+        ingredientFillLevels[index].setProgress(fillValue);
+
+        // Ana şişenin doluluk seviyesini güncelle
+        int mainFillValue = (int)(mainBottleFillValue * 100);
+        mainBottleFillLevel.setProgress(mainFillValue);
+
+        // Doldurma animasyonu
+        ObjectAnimator.ofInt(ingredientFillLevels[index], "progress", fillValue)
+                .setDuration(100)
+                .start();
+
+        ObjectAnimator.ofInt(mainBottleFillLevel, "progress", mainFillValue)
+                .setDuration(100)
+                .start();
+    }
+
+    private void stopPouringSound() {
+        if (pourSound != null && pourSound.isPlaying()) {
+            pourSound.pause();
+        }
+    }
+
+    private void checkTotalValue() {
+        float total = 0f;
+        for (float value : currentIngredientValues) {
+            total += value;
+        }
+
+        if (total > 1.0f) {
+            Toast.makeText(this, "Toplam karışım 1.0'ı aşamaz! Şu an: " + String.format("%.2f", total),
+                    Toast.LENGTH_SHORT).show();
+
+            // Şişeleri doldurma işlemini durdur
+            for (int i = 0; i < isBottleTouched.length; i++) {
+                isBottleTouched[i] = false;
+            }
+        }
+    }
+
+    private void startNewLevel() {
+        currentMixture.clear();
+        resetBottles();
+        stopTimer();
+
+        isGameActive = true;
+        mixButton.setText("Karıştır");
+
+        int numIngredients = Math.min(2 + currentLevel / 2, 5);
+
+        previousLevelIngredients.clear();
+        previousLevelIngredients.addAll(currentLevelIngredients);
+        currentLevelIngredients.clear();
+
+        List<String> shuffledIngredients = new ArrayList<>(availableIngredients);
+        java.util.Collections.shuffle(shuffledIngredients);
+
+        for (int i = 0; i < numIngredients; i++) {
+            currentLevelIngredients.add(shuffledIngredients.get(i));
+        }
+
+        updateUIForNewLevel(numIngredients);
+        generateCustomerRequest(numIngredients);
+        startTimer();
+    }
+
+    private void updateUIForNewLevel(int numIngredients) {
+        for (int i = 0; i < ingredientBottleImageViews.length; i++) {
+            if (i < numIngredients) {
+                ingredientBottleImageViews[i].setVisibility(View.VISIBLE);
+                ingredientValueTextViews[i].setVisibility(View.VISIBLE);
+                ingredientNameTextViews[i].setVisibility(View.VISIBLE);
+                ingredientFillLevels[i].setVisibility(View.VISIBLE);
+                ingredientNameTextViews[i].setText(currentLevelIngredients.get(i));
+                ingredientValueTextViews[i].setText("0.00");
+                ingredientFillLevels[i].setProgress(0);
+
+                // Burada uygun şişe resimlerini yükleyebilirsiniz
+                // Örneğin:
+                // int resourceId = getResources().getIdentifier(
+                //     "bottle_" + currentLevelIngredients.get(i).toLowerCase(), "drawable", getPackageName());
+                // ingredientBottleImageViews[i].setImageResource(resourceId);
+            } else {
+                ingredientBottleImageViews[i].setVisibility(View.GONE);
+                ingredientValueTextViews[i].setVisibility(View.GONE);
+                ingredientNameTextViews[i].setVisibility(View.GONE);
+                ingredientFillLevels[i].setVisibility(View.GONE);
+            }
+        }
+
+        // Ana şişeyi sıfırla
+        mainBottleFillLevel.setProgress(0);
+    }
+
+    private void generateCustomerRequest(int numIngredients) {
+        previousRequestedMixture.clear();
+        previousRequestedMixture.putAll(requestedMixture);
+        previousCustomerRequest = customerRequestTextView.getText().toString();
+
+        requestedMixture.clear();
+        StringBuilder requestText = new StringBuilder("Müşteri İsteği:\n");
+        float totalValue = 0f;
+
+        for (int i = 0; i < numIngredients - 1; i++) {
+            String ingredient = currentLevelIngredients.get(i);
+            float maxValue = 1.0f - totalValue - ((numIngredients - i - 1) * 0.01f);
+            float value = maxValue > 0 ? (random.nextFloat() * maxValue) : 0f;
+            value = Math.round(value * 100) / 100f; // İki ondalık basamağa yuvarla
+
+            totalValue += value;
+            requestedMixture.put(ingredient, value);
+            requestText.append(ingredient).append(": ").append(String.format("%.2f", value)).append("\n");
+        }
+
+        String lastIngredient = currentLevelIngredients.get(numIngredients - 1);
+        float lastValue = Math.round((1.0f - totalValue) * 100) / 100f; // İki ondalık basamağa yuvarla
+        requestedMixture.put(lastIngredient, lastValue);
+        requestText.append(lastIngredient).append(": ").append(String.format("%.2f", lastValue));
+
+        customerRequestTextView.setText(requestText.toString());
+    }
+
+    private void startTimer() {
+        stopTimer();
+        timeRemaining = Math.max(30, 60 - (currentLevel * 2));
+        timerProgressBar.setMax(timeRemaining);
+        timerProgressBar.setProgress(timeRemaining);
+        timerRunning = true;
+
+        timerThread = new Thread(() -> {
+            while (timeRemaining > 0 && isGameActive && timerRunning) {
+                try {
+                    Thread.sleep(1000);
+                    timeRemaining--;
+                    runOnUiThread(() -> {
+                        timeTextView.setText("Süre: " + timeRemaining + "s");
+                        timerProgressBar.setProgress(timeRemaining);
+                        if (timeRemaining <= 0) {
+                            playTimeUpSound();
+                            endGame(false);
+                        }
+                    });
+                } catch (InterruptedException e) {
+                    break;
+                }
+            }
+        });
+        timerThread.start();
+    }
+
+    private void stopTimer() {
+        timerRunning = false;
+        if (timerThread != null && timerThread.isAlive()) {
+            timerThread.interrupt();
+        }
+    }
+
+    private void checkMixture() {
+        float totalValue = 0f;
+        for (float value : currentIngredientValues) {
+            totalValue += value;
+        }
+
+        if (Math.abs(totalValue - 1.0f) > 0.01f) {
+            Toast.makeText(this, "Toplam karışım 1.0 olmalıdır! Şu an: " + String.format("%.2f", totalValue),
+                    Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        int accuracy = calculateAccuracy();
+        int threshold = Math.max(70, 90 - currentLevel * 2);
+
+        if (accuracy >= threshold) {
+            levelComplete(accuracy);
+        } else {
+            Toast.makeText(this, "Olmadı! Doğruluk: %" + accuracy + "\nEn az %" + threshold +
+                    " gerekiyor.", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void levelComplete(int accuracy) {
+        stopTimer();
+        int levelScore = accuracy * currentLevel;
+        score += levelScore;
+
+        playLevelCompleteSound();
+
+        Toast.makeText(this, "Harika! Doğruluk: %" + accuracy + "\nKazanılan puan: " +
+                levelScore, Toast.LENGTH_LONG).show();
+
+        currentLevel++;
+        saveGameState();
+        updateLevelUI();
+        resetBottles();
+
+        isGameActive = false;
+        mixButton.setText("Sonraki Seviye");
+    }
+
+    private void resetBottles() {
+        currentMixture.clear();
+        mainBottleFillValue = 0f;
+        mainBottleFillLevel.setProgress(0);
+
+        for (int i = 0; i < currentIngredientValues.length; i++) {
+            currentIngredientValues[i] = 0f;
+            isBottleTouched[i] = false;
+
+            if (ingredientValueTextViews[i] != null) {
+                ingredientValueTextViews[i].setText("0.00");
+            }
+
+            if (ingredientFillLevels[i] != null) {
+                ingredientFillLevels[i].setProgress(0);
+            }
+        }
+    }
+
+    private int calculateAccuracy() {
+        return 100 - Math.round(currentLevelIngredients.stream()
+                .map(ingredient -> Math.abs(
+                        requestedMixture.getOrDefault(ingredient, 0f) -
+                                currentMixture.getOrDefault(ingredient, 0f)
+                ) * 100) // Farkı 100 ile çarp (0-1 aralığından 0-100 aralığına)
+                .reduce(0f, Float::sum));
+    }
+
+    // MainActivity.java içindeki endGame metodunda değişiklik yapın:
+
+    private void endGame(boolean completed) {
+        stopTimer();
+        isGameActive = false;
+        resetBottles();
+
+        if (!completed) {
+            playTimeUpSound();
+        }
+
+        // Skoru kaydetmeden önce oyuncu adını kontrol edelim
+        if (score > 0) {
+            SharedPreferences prefs = getSharedPreferences(PLAYER_NAME_PREF,MODE_PRIVATE);
+            String currentPlayerName = prefs.getString(KEY_PLAYER_NAME, "Anonim");
+
+            // Skoru kaydet
+            HighScoresActivity.addScore(this, score, currentPlayerName);
+
+            // Debug için log yazdıralım
+            Log.d("MainActivity", "Skor kaydedildi: " + score + " - Oyuncu: " + currentPlayerName);
+        }
+
+        String message = completed ?
+                "Tebrikler! Oyunu tamamladınız.\nToplam Puan: " + score :
+                "Süre doldu! Oyun bitti.\nToplam Puan: " + score;
+
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+
+        mixButton.setText("Yeni Oyun");
+        previousLevelIngredients.clear();
+        previousRequestedMixture.clear();
+        previousCustomerRequest = "";
+        currentLevel = 1;
+        score = 0;
+        saveGameState();
+    }
+
+    private void updateLevelUI() {
+        levelTextView.setText("Seviye: " + currentLevel);
+        scoreTextView.setText("Puan: " + score);
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        stopTimer();
+        saveGameState();
+
+        for (int i = 0; i < isBottleTouched.length; i++) {
+            isBottleTouched[i] = false;
+        }
+
+        if (backgroundMusicPlayer != null && backgroundMusicPlayer.isPlaying()) {
+            backgroundMusicPlayer.pause();
+        }
+
+        if (pourSound != null && pourSound.isPlaying()) {
+            pourSound.pause();
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        loadSettings(); // Ayarları tekrar yükle
+        if (isGameActive) {
+            startTimer();
+        }
+
+        if (backgroundMusicPlayer != null && !backgroundMusicPlayer.isPlaying() && isMusicEnabled) {
+            backgroundMusicPlayer.start();
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        stopTimer();
+        saveGameState();
+
+        if (backgroundMusicPlayer != null) {
+            backgroundMusicPlayer.stop();
+            backgroundMusicPlayer.release();
+            backgroundMusicPlayer = null;
+        }
+
+        if (levelCompleteSound != null) {
+            levelCompleteSound.release();
+            levelCompleteSound = null;
+        }
+
+        if (timeUpSound != null) {
+            timeUpSound.release();
+            timeUpSound = null;
+        }
+
+        if (pourSound != null) {
+            pourSound.release();
+            pourSound = null;
+        }
+    }
+}
