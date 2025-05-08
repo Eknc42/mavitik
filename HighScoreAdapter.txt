@@ -1,0 +1,85 @@
+package com.example.scentmixmaster;
+
+import android.view.LayoutInflater;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.TextView;
+import androidx.annotation.NonNull;
+import androidx.recyclerview.widget.RecyclerView;
+import java.util.List;
+
+public class HighScoreAdapter extends RecyclerView.Adapter<HighScoreAdapter.ViewHolder> {
+    private List<ScoreEntry> scores;
+
+    public HighScoreAdapter(List<ScoreEntry> scores) {
+        this.scores = scores;
+    }
+
+    @NonNull
+    @Override
+    public ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+        View view = LayoutInflater.from(parent.getContext())
+                .inflate(R.layout.item_high_score, parent, false);
+        return new ViewHolder(view);
+    }
+
+    @Override
+    public void onBindViewHolder(@NonNull ViewHolder holder, int position) {
+        ScoreEntry entry = scores.get(position);
+
+        // Sıralama
+        holder.rankTextView.setText(String.valueOf(entry.getRank()));
+        holder.rankTextView.setContentDescription("Sıralama " + entry.getRank());
+
+        // Oyuncu adı
+        holder.playerNameTextView.setText(entry.getPlayerName());
+        holder.playerNameTextView.setContentDescription("Oyuncu " + entry.getPlayerName());
+
+        // Tarih
+        holder.dateTextView.setText(entry.getDate());
+        holder.dateTextView.setContentDescription("Tarih " + entry.getDate());
+
+        // Skor
+        holder.scoreTextView.setText(String.valueOf(entry.getScore()));
+        holder.scoreTextView.setContentDescription("Skor " + entry.getScore() + " puan");
+
+        // İlk üç sıra için özel renkler
+        if (position == 0) {
+            holder.rankTextView.setTextColor(0xFFFFD700); // Altın
+            holder.itemView.setContentDescription("Birinci sırada " + entry.getPlayerName() + ", " + entry.getScore() + " puan");
+        } else if (position == 1) {
+            holder.rankTextView.setTextColor(0xFFC0C0C0); // Gümüş
+            holder.itemView.setContentDescription("İkinci sırada " + entry.getPlayerName() + ", " + entry.getScore() + " puan");
+        } else if (position == 2) {
+            holder.rankTextView.setTextColor(0xFFCD7F32); // Bronz
+            holder.itemView.setContentDescription("Üçüncü sırada " + entry.getPlayerName() + ", " + entry.getScore() + " puan");
+        } else {
+            holder.itemView.setContentDescription(entry.getRank() + ". sırada " + entry.getPlayerName() + ", " + entry.getScore() + " puan");
+        }
+    }
+
+    @Override
+    public int getItemCount() {
+        return scores.size();
+    }
+
+    public void updateScores(List<ScoreEntry> newScores) {
+        this.scores = newScores;
+        notifyDataSetChanged();
+    }
+
+    static class ViewHolder extends RecyclerView.ViewHolder {
+        TextView rankTextView;
+        TextView playerNameTextView;
+        TextView dateTextView;
+        TextView scoreTextView;
+
+        ViewHolder(View view) {
+            super(view);
+            rankTextView = view.findViewById(R.id.rankTextView);
+            playerNameTextView = view.findViewById(R.id.playerNameTextView);
+            dateTextView = view.findViewById(R.id.dateTextView);
+            scoreTextView = view.findViewById(R.id.scoreTextView);
+        }
+    }
+}
