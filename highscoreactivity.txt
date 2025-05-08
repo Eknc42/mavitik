@@ -1,18 +1,15 @@
 package com.example.scentmixmaster;
 
-import android.content.Context;
+import android.content.SharedPreferences;
 import android.os.Bundle;
-import android.view.View;
 import android.widget.ImageButton;
-import android.widget.ProgressBar;
-import android.widget.TextView;
-import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
-import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 import com.google.android.material.tabs.TabLayout;
-
+import com.google.gson.Gson;
+import com.google.gson.reflect.TypeToken;
+import java.lang.reflect.Type;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -22,129 +19,108 @@ import java.util.Comparator;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import android.content.Context;
+import android.view.MenuItem;
+import android.widget.Toast;
 
 public class HighScoresActivity extends AppCompatActivity {
-    private static final String TAG = "HighScoresActivity";
-    
+    private static final String SCORES_PREFS = "HighScoresPrefs";
+    private static final String KEY_SCORES = "scores";
+
     private RecyclerView scoresRecyclerView;
     private HighScoreAdapter adapter;
     private TabLayout tabLayout;
     private List<ScoreEntry> allScores;
     private SimpleDateFormat dateFormat;
     private ImageButton backButton;
-    private ProgressBar loadingProgressBar;
-    private TextView noScoresTextView;
-    private SwipeRefreshLayout swipeRefreshLayout;
-    
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_high_scores);
-        
+
         dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US);
-        
+
         initializeViews();
         setupBackButton();
-        setupSwipeRefresh();
         loadScores();
         setupTabLayout();
-        
-        // Bekleyen skorları senkronize et
-        ScoreSyncService.getInstance().syncPendingUploads(this);
     }
-    
+
     private void initializeViews() {
         scoresRecyclerView = findViewById(R.id.scoresRecyclerView);
         scoresRecyclerView.setLayoutManager(new LinearLayoutManager(this));
-        
+
         tabLayout = findViewById(R.id.tabLayout);
         backButton = findViewById(R.id.backButton);
-        loadingProgressBar = findViewById(R.id.loadingProgressBar);
-        noScoresTextView = findViewById(R.id.noScoresTextView);
-        swipeRefreshLayout = findViewById(R.id.swipeRefreshLayout);
     }
-    
+
     private void setupBackButton() {
         backButton.setOnClickListener(v -> {
-            finish();
+            finish(); // Activity'yi sonlandır ve ana menüye dön
         });
     }
-    
-    private void setupSwipeRefresh() {
-        swipeRefreshLayout.setOnRefreshListener(this::refreshScores);
-        swipeRefreshLayout.setColorSchemeResources(
-                android.R.color.holo_blue_bright,
-                android.R.color.holo_green_light,
-                android.R.color.holo_orange_light,
-                android.R.color.holo_red_light
-        );
-    }
-    
-    private void refreshScores() {
-        loadScores();
-    }
-    
+
     private void loadScores() {
-        showLoading(true);
-        
-        // Skore servisi ile çevrimiçi skorları al
-        ScoreSyncService.getInstance().fetchScores(this, new ScoreSyncService.OnScoresFetchedListener() {
-            @Override
-            public void onScoresFetched(List<ScoreEntry> scores) {
-                allScores = scores != null ? scores : new ArrayList<>();
-                
-                // Adapter ilk kez yükleniyorsa oluştur
-                if (adapter == null) {
-                    adapter = new HighScoreAdapter(new ArrayList<>());
-                    scoresRecyclerView.setAdapter(adapter);
-                }
-                
-                // Başlangıçta günlük skorları göster
-                filterAndShowScores(tabLayout.getSelectedTabPosition());
-                
-                showLoading(false);
-                swipeRefreshLayout.setRefreshing(false);
-            }
-        });
-    }
-    
-    private void showLoading(boolean isLoading) {
-        loadingProgressBar.setVisibility(isLoading ? View.VISIBLE : View.GONE);
-        
-        if (isLoading) {
-            noScoresTextView.setVisibility(View.GONE);
-            swipeRefreshLayout.setVisibility(View.GONE);
-        } else {
-            swipeRefreshLayout.setVisibility(View.VISIBLE);
+        SharedPreferences prefs = getSharedPreferences(SCORES_PREFS, Context.MODE_PRIVATE);
+        String scoresJson = prefs.getString(KEY_SCORES, "[]");
+
+        Gson gson = new Gson();
+        Type type = new TypeToken<List<ScoreEntry>>(){}.getType();
+        allScores = gson.fromJson(scoresJson, type);
+
+        if (allScores == null || allScores.isEmpty()) {
+            // Test için örnek skorlar ekleyelim
+            allScores = new ArrayList<>();
+
+            // Bugünün tarihi için birkaç skor
+            SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US);
+            String currentDate = sdf.format(new Date());
+
+            // Test skorları artık farklı oyuncu isimleriyle
+            allScores.add(new ScoreEntry("Alice", 1000, currentDate));
+            allScores.add(new ScoreEntry("Bob", 750, currentDate));
+            allScores.add(new ScoreEntry("Charlie", 500, currentDate));
+
+            // Skorları SharedPreferences'a kaydedelim
+            SharedPreferences.Editor editor = prefs.edit();
+            editor.putString(KEY_SCORES, gson.toJson(allScores));
+            editor.apply();
         }
+
+        adapter = new HighScoreAdapter(new ArrayList<>());
+        scoresRecyclerView.setAdapter(adapter);
+
+        // Başlangıçta günlük skorları göster
+        filterAndShowScores(0);
     }
-    
+
     private void setupTabLayout() {
         tabLayout.addOnTabSelectedListener(new TabLayout.OnTabSelectedListener() {
             @Override
             public void onTabSelected(TabLayout.Tab tab) {
                 filterAndShowScores(tab.getPosition());
             }
-            
+
             @Override
             public void onTabUnselected(TabLayout.Tab tab) {}
-            
+
             @Override
             public void onTabReselected(TabLayout.Tab tab) {}
         });
     }
-    
+
     private void filterAndShowScores(int tabPosition) {
         List<ScoreEntry> filteredScores = new ArrayList<>();
         Date now = new Date();
-        
+
         for (ScoreEntry score : allScores) {
             try {
                 Date scoreDate = dateFormat.parse(score.getDate());
                 if (scoreDate != null) {
                     Calendar cal = Calendar.getInstance();
                     cal.setTime(now);
-                    
+
                     switch (tabPosition) {
                         case 0: // Günlük
                             Calendar scoreCal = Calendar.getInstance();
@@ -154,14 +130,14 @@ public class HighScoresActivity extends AppCompatActivity {
                                 filteredScores.add(score);
                             }
                             break;
-                            
+
                         case 1: // Haftalık
                             cal.add(Calendar.DAY_OF_YEAR, -7);
                             if (scoreDate.after(cal.getTime())) {
                                 filteredScores.add(score);
                             }
                             break;
-                            
+
                         case 2: // Tüm Zamanlar
                             filteredScores.add(score);
                             break;
@@ -171,7 +147,7 @@ public class HighScoresActivity extends AppCompatActivity {
                 e.printStackTrace();
             }
         }
-        
+
         // Skorları sırala
         Collections.sort(filteredScores, new Comparator<ScoreEntry>() {
             @Override
@@ -179,17 +155,16 @@ public class HighScoresActivity extends AppCompatActivity {
                 return Integer.compare(o2.getScore(), o1.getScore());
             }
         });
-        
+
         // Sıra numaralarını ata
         for (int i = 0; i < filteredScores.size(); i++) {
             filteredScores.get(i).setRank(i + 1);
         }
-        
+
         adapter.updateScores(filteredScores);
-        
+
         // Eğer liste boşsa kullanıcıya bilgi ver
         if (filteredScores.isEmpty()) {
-            noScoresTextView.setVisibility(View.VISIBLE);
             String periodText = "";
             switch (tabPosition) {
                 case 0:
@@ -202,23 +177,37 @@ public class HighScoresActivity extends AppCompatActivity {
                     periodText = "";
                     break;
             }
-            noScoresTextView.setText(periodText.isEmpty() ? 
-                    "Henüz hiç skor kaydedilmemiş" : 
-                    "Henüz " + periodText + " skor kaydedilmemiş");
-        } else {
-            noScoresTextView.setVisibility(View.GONE);
+            Toast.makeText(this,
+                    periodText.isEmpty() ? "Henüz hiç skor kaydedilmemiş" :
+                            "Henüz " + periodText + " skor kaydedilmemiş",
+                    Toast.LENGTH_SHORT).show();
         }
     }
-    
-    // Yeni skor ekleme statik metodu - Artık ScoreSyncService'i kullanır
+
+    // Yeni skor ekleme metodu
     public static void addScore(Context context, int score, String playerName) {
-        ScoreSyncService.getInstance().addScore(context, score, playerName);
-    }
-    
-    @Override
-    protected void onResume() {
-        super.onResume();
-        // Activity her öne geldiğinde skorları yenile
-        loadScores();
-    }
-}
+        SharedPreferences prefs = context.getSharedPreferences(SCORES_PREFS, Context.MODE_PRIVATE);
+        String scoresJson = prefs.getString(KEY_SCORES, "[]");
+
+        Gson gson = new Gson();
+        Type type = new TypeToken<List<ScoreEntry>>(){}.getType();
+        List<ScoreEntry> scores = gson.fromJson(scoresJson, type);
+
+        if (scores == null) {
+            scores = new ArrayList<>();
+        }
+
+        // Yeni skoru ekle
+        ScoreEntry newScore = new ScoreEntry(
+                playerName, // Artık sabit değer yerine parametre olarak gelen ismi kullanıyoruz
+                score,
+                new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date())
+        );
+
+        scores.add(newScore);
+
+        // Skorları kaydet
+        SharedPreferences.Editor editor = prefs.edit();
+        editor.putString(KEY_SCORES, gson.toJson(scores));
+        editor.apply();
+    }}

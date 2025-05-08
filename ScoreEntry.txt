@@ -1,32 +1,19 @@
 package com.example.scentmixmaster;
 
-/**
- * Skor bilgilerini temsil eden model sınıfı
- */
 public class ScoreEntry {
     private String playerName;
     private int score;
     private String date;
-    private int rank;  // Sıralama bilgisi
-    private String serverId;  // Sunucu ID'si (online senkronizasyon için)
+    private int rank;  // Sıralama için
 
     public ScoreEntry(String playerName, int score, String date) {
         this.playerName = playerName;
         this.score = score;
         this.date = date;
-        this.rank = 0;
-        this.serverId = null;
+        this.rank = 0;  // Varsayılan değer
     }
 
-    // Sunucu ID'li constructor
-    public ScoreEntry(String playerName, int score, String date, String serverId) {
-        this.playerName = playerName;
-        this.score = score;
-        this.date = date;
-        this.rank = 0;
-        this.serverId = serverId;
-    }
-
+    // Getter ve Setter metodları
     public String getPlayerName() {
         return playerName;
     }
@@ -57,36 +44,5 @@ public class ScoreEntry {
 
     public void setRank(int rank) {
         this.rank = rank;
-    }
-
-    public String getServerId() {
-        return serverId;
-    }
-
-    public void setServerId(String serverId) {
-        this.serverId = serverId;
-    }
-
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-
-        ScoreEntry that = (ScoreEntry) o;
-
-        if (score != that.score) return false;
-        if (playerName != null ? !playerName.equals(that.playerName) : that.playerName != null)
-            return false;
-        if (date != null ? !date.equals(that.date) : that.date != null) return false;
-        return serverId != null ? serverId.equals(that.serverId) : that.serverId == null;
-    }
-
-    @Override
-    public int hashCode() {
-        int result = playerName != null ? playerName.hashCode() : 0;
-        result = 31 * result + score;
-        result = 31 * result + (date != null ? date.hashCode() : 0);
-        result = 31 * result + (serverId != null ? serverId.hashCode() : 0);
-        return result;
     }
 }
