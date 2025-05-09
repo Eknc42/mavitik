@@ -12,16 +12,25 @@ import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 import android.animation.ObjectAnimator;
+
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Random;
 import androidx.appcompat.app.AlertDialog;
 import android.widget.EditText;
 
+
 import android.util.Log;
 
+import com.google.firebase.auth.FirebaseAuth;
+import com.google.firebase.auth.FirebaseUser;
+import com.google.firebase.database.DatabaseReference;
+import com.google.firebase.database.FirebaseDatabase;
 
 
 public class MainActivity extends AppCompatActivity {
@@ -29,6 +38,8 @@ public class MainActivity extends AppCompatActivity {
 
     // UI Bileşenleri
     private TextView levelTextView;
+    private Button resetButton;
+    private FirebaseAuth mAuth;
     private TextView scoreTextView;
     private TextView customerRequestTextView;
     private TextView timeTextView;
@@ -64,6 +75,17 @@ public class MainActivity extends AppCompatActivity {
     private boolean[] isBottleTouched;
     private float[] currentIngredientValues;
     private float mainBottleFillValue = 0f;
+    private String convertTurkishToEnglish(String text) {
+        text = text.toLowerCase();
+        text = text.replace("ç", "c")
+                .replace("ğ", "g")
+                .replace("ı", "i")
+                .replace("ö", "o")
+                .replace("ş", "s")
+                .replace("ü", "u")
+                .replace(" ", "_");
+        return text;
+    }
 
     // SharedPreferences
     public static final String PREFS_NAME = "ScentMixMasterPrefs";
@@ -86,6 +108,10 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+        mAuth = FirebaseAuth.getInstance();
+        if (mAuth.getCurrentUser() == null) {
+            signInAnonymously();
+        }
         checkPlayerName();
 
 
@@ -95,6 +121,21 @@ public class MainActivity extends AppCompatActivity {
         initializeGame();
         setupListeners();
         initializeSounds();
+    }
+    private void signInAnonymously() {
+        mAuth.signInAnonymously()
+                .addOnCompleteListener(this, task -> {
+                    if (task.isSuccessful()) {
+                        // Giriş başarılı
+                        FirebaseUser user = mAuth.getCurrentUser();
+                        Log.d("MainActivity", "Anonim giriş başarılı: " + user.getUid());
+                    } else {
+                        // Giriş başarısız
+                        Log.w("MainActivity", "Anonim giriş başarısız", task.getException());
+                        Toast.makeText(MainActivity.this, "Yüksek skor kaydetme özelliği şu anda kullanılamıyor.",
+                                Toast.LENGTH_SHORT).show();
+                    }
+                });
     }
 
     private void loadSettings() {
@@ -220,6 +261,7 @@ public class MainActivity extends AppCompatActivity {
     private void initializeViews() {
         levelTextView = findViewById(R.id.levelTextView);
         scoreTextView = findViewById(R.id.scoreTextView);
+        resetButton = findViewById(R.id.resetButton);
         customerRequestTextView = findViewById(R.id.customerRequestTextView);
         timeTextView = findViewById(R.id.timeTextView);
         mixButton = findViewById(R.id.mixButton);
@@ -311,6 +353,28 @@ public class MainActivity extends AppCompatActivity {
         editor.putInt(KEY_SCORE, score);
         editor.apply();
     }
+    private void resetMixture() {
+        // Karışımı ve şişeleri sıfırlar ama oyunu yeniden başlatmaz
+        currentMixture.clear();
+        mainBottleFillValue = 0f;
+        mainBottleFillLevel.setProgress(0);
+
+        for (int i = 0; i < currentIngredientValues.length; i++) {
+            currentIngredientValues[i] = 0f;
+            isBottleTouched[i] = false;
+
+            if (ingredientValueTextViews[i] != null) {
+                ingredientValueTextViews[i].setText("0.00");
+            }
+
+            if (ingredientFillLevels[i] != null) {
+                ingredientFillLevels[i].setProgress(0);
+            }
+        }
+
+        // Sıfırlama animasyonu ve sesi eklenebilir
+        Toast.makeText(this, "Karışım sıfırlandı!", Toast.LENGTH_SHORT).show();
+    }
 
     private void initializeGame() {
         // Tüm mevcut malzemeleri tanımla
@@ -327,6 +391,7 @@ public class MainActivity extends AppCompatActivity {
 
         updateLevelUI();
     }
+
 
     private void setupListeners() {
         for (int i = 0; i < ingredientBottleImageViews.length; i++) {
@@ -349,6 +414,11 @@ public class MainActivity extends AppCompatActivity {
                         return true;
                 }
                 return false;
+            });
+            resetButton.setOnClickListener(v -> {
+                if (isGameActive) {
+                    resetMixture();
+                }
             });
         }
 
@@ -448,6 +518,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void startNewLevel() {
+
         currentMixture.clear();
         resetBottles();
         stopTimer();
@@ -484,11 +555,18 @@ public class MainActivity extends AppCompatActivity {
                 ingredientValueTextViews[i].setText("0.00");
                 ingredientFillLevels[i].setProgress(0);
 
-                // Burada uygun şişe resimlerini yükleyebilirsiniz
-                // Örneğin:
-                // int resourceId = getResources().getIdentifier(
-                //     "bottle_" + currentLevelIngredients.get(i).toLowerCase(), "drawable", getPackageName());
-                // ingredientBottleImageViews[i].setImageResource(resourceId);
+                // Her parfüm notası için özel şişe resimlerini yükle
+                String ingredientName = convertTurkishToEnglish(currentLevelIngredients.get(i));
+                int resourceId = getResources().getIdentifier(
+                        "bottle_" + ingredientName, "drawable", getPackageName());
+
+                // Eğer özel görsel bulunamazsa, varsayılan şişe görselini kullan
+                if (resourceId == 0) {
+                    resourceId = getResources().getIdentifier(
+                            "perfume_bottle_" + (i + 1), "drawable", getPackageName());
+                }
+
+                ingredientBottleImageViews[i].setImageResource(resourceId);
             } else {
                 ingredientBottleImageViews[i].setVisibility(View.GONE);
                 ingredientValueTextViews[i].setVisibility(View.GONE);
@@ -496,6 +574,7 @@ public class MainActivity extends AppCompatActivity {
                 ingredientFillLevels[i].setVisibility(View.GONE);
             }
         }
+
 
         // Ana şişeyi sıfırla
         mainBottleFillLevel.setProgress(0);
@@ -531,7 +610,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void startTimer() {
         stopTimer();
-        timeRemaining = Math.max(30, 60 - (currentLevel * 2));
+        timeRemaining = Math.max(20, 60 - (currentLevel * 2));
         timerProgressBar.setMax(timeRemaining);
         timerProgressBar.setProgress(timeRemaining);
         timerRunning = true;
@@ -645,16 +724,34 @@ public class MainActivity extends AppCompatActivity {
             playTimeUpSound();
         }
 
-        // Skoru kaydetmeden önce oyuncu adını kontrol edelim
         if (score > 0) {
-            SharedPreferences prefs = getSharedPreferences(PLAYER_NAME_PREF,MODE_PRIVATE);
-            String currentPlayerName = prefs.getString(KEY_PLAYER_NAME, "Anonim");
+            FirebaseUser currentUser = mAuth.getCurrentUser();
+            if (currentUser != null) {
+                SharedPreferences prefs = getSharedPreferences(PLAYER_NAME_PREF, MODE_PRIVATE);
+                String currentPlayerName = prefs.getString(KEY_PLAYER_NAME, "Anonim");
 
-            // Skoru kaydet
-            HighScoresActivity.addScore(this, score, currentPlayerName);
+                // Firebase'e skoru kaydet
+                ScoreEntry newScore = new ScoreEntry(
+                        currentPlayerName,
+                        score,
+                        new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date())
+                );
 
-            // Debug için log yazdıralım
-            Log.d("MainActivity", "Skor kaydedildi: " + score + " - Oyuncu: " + currentPlayerName);
+                DatabaseReference scoresRef = FirebaseDatabase.getInstance()
+                        .getReference("scores");
+
+                scoresRef.push().setValue(newScore)
+                        .addOnSuccessListener(aVoid -> {
+                            Toast.makeText(MainActivity.this,
+                                    "Skorunuz başarıyla kaydedildi!",
+                                    Toast.LENGTH_SHORT).show();
+                        })
+                        .addOnFailureListener(e -> {
+                            Toast.makeText(MainActivity.this,
+                                    "Skor kaydedilirken hata oluştu: " + e.getMessage(),
+                                    Toast.LENGTH_SHORT).show();
+                        });
+            }
         }
 
         String message = completed ?
