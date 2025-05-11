@@ -1,6 +1,9 @@
 package com.example.scentmixmaster;
 
 import androidx.appcompat.app.AppCompatActivity;
+
+import android.animation.ValueAnimator;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.media.MediaPlayer;
 import android.os.Bundle;
@@ -31,6 +34,7 @@ import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseUser;
 import com.google.firebase.database.DatabaseReference;
 import com.google.firebase.database.FirebaseDatabase;
+
 
 
 public class MainActivity extends AppCompatActivity {
@@ -478,20 +482,27 @@ public class MainActivity extends AppCompatActivity {
     private void updateBottleFillLevels(int index) {
         // Malzeme şişesinin doluluk seviyesini güncelle (0-100)
         int fillValue = (int)(currentIngredientValues[index] * 100);
-        ingredientFillLevels[index].setProgress(fillValue);
 
         // Ana şişenin doluluk seviyesini güncelle
         int mainFillValue = (int)(mainBottleFillValue * 100);
-        mainBottleFillLevel.setProgress(mainFillValue);
 
-        // Doldurma animasyonu
-        ObjectAnimator.ofInt(ingredientFillLevels[index], "progress", fillValue)
-                .setDuration(100)
-                .start();
+        // Yumuşak dolum animasyonu için ValueAnimator kullan
+        ValueAnimator ingredientAnimator = ValueAnimator.ofInt(ingredientFillLevels[index].getProgress(), fillValue);
+        ingredientAnimator.setDuration(100);
+        ingredientAnimator.addUpdateListener(animation -> {
+            int animatedValue = (int) animation.getAnimatedValue();
+            ingredientFillLevels[index].setProgress(animatedValue);
+        });
+        ingredientAnimator.start();
 
-        ObjectAnimator.ofInt(mainBottleFillLevel, "progress", mainFillValue)
-                .setDuration(100)
-                .start();
+        // Ana şişe için ayrı bir animator
+        ValueAnimator mainAnimator = ValueAnimator.ofInt(mainBottleFillLevel.getProgress(), mainFillValue);
+        mainAnimator.setDuration(100);
+        mainAnimator.addUpdateListener(animation -> {
+            int animatedValue = (int) animation.getAnimatedValue();
+            mainBottleFillLevel.setProgress(animatedValue);
+        });
+        mainAnimator.start();
     }
 
     private void stopPouringSound() {
@@ -745,13 +756,25 @@ public class MainActivity extends AppCompatActivity {
                             Toast.makeText(MainActivity.this,
                                     "Skorunuz başarıyla kaydedildi!",
                                     Toast.LENGTH_SHORT).show();
+
+                            // Score saved successfully, now redirect to main menu
+                            redirectToMainMenu();
                         })
                         .addOnFailureListener(e -> {
                             Toast.makeText(MainActivity.this,
                                     "Skor kaydedilirken hata oluştu: " + e.getMessage(),
                                     Toast.LENGTH_SHORT).show();
+
+                            // Even if score saving fails, redirect to main menu
+                            redirectToMainMenu();
                         });
+            } else {
+                // No user is logged in, redirect to main menu directly
+                redirectToMainMenu();
             }
+        } else {
+            // No score to save, redirect to main menu directly
+            redirectToMainMenu();
         }
 
         String message = completed ?
@@ -760,13 +783,31 @@ public class MainActivity extends AppCompatActivity {
 
         Toast.makeText(this, message, Toast.LENGTH_LONG).show();
 
-        mixButton.setText("Yeni Oyun");
+        // The following code is no longer needed since we're redirecting to the main menu
+        // mixButton.setText("Yeni Oyun");
         previousLevelIngredients.clear();
         previousRequestedMixture.clear();
         previousCustomerRequest = "";
         currentLevel = 1;
         score = 0;
         saveGameState();
+    }
+
+    /**
+     * Redirects the user to the main menu activity
+     */
+    private void redirectToMainMenu() {
+        // Create an intent to start the MainMenuActivity
+        Intent intent = new Intent(MainActivity.this, MainMenuActivity.class);
+
+        // You can pass any relevant data to the main menu if needed
+        intent.putExtra("LAST_SCORE", score);
+
+        // Start the activity
+        startActivity(intent);
+
+        // Finish this activity so pressing back won't return to the game
+        finish();
     }
 
     private void updateLevelUI() {
