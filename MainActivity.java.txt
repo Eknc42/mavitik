@@ -7,6 +7,8 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.media.MediaPlayer;
 import android.os.Bundle;
+import android.os.Handler;
+import androidx.annotation.NonNull;
 import android.view.MotionEvent;
 import android.view.View;
 import android.widget.Button;
@@ -18,6 +20,7 @@ import android.animation.ObjectAnimator;
 
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
@@ -30,17 +33,34 @@ import android.widget.EditText;
 
 import android.util.Log;
 
+import com.google.android.gms.ads.RequestConfiguration;
+import com.google.android.gms.ads.initialization.InitializationStatus;
+import com.google.android.gms.ads.initialization.OnInitializationCompleteListener;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseUser;
+import com.google.firebase.database.DataSnapshot;
+import com.google.firebase.database.DatabaseError;
 import com.google.firebase.database.DatabaseReference;
 import com.google.firebase.database.FirebaseDatabase;
 
+import com.google.android.gms.ads.AdError;
+import com.google.android.gms.ads.AdRequest;
+import com.google.android.gms.ads.FullScreenContentCallback;
+import com.google.android.gms.ads.LoadAdError;
+import com.google.android.gms.ads.MobileAds;
+import com.google.android.gms.ads.interstitial.InterstitialAd;
+import com.google.android.gms.ads.interstitial.InterstitialAdLoadCallback;
+import com.google.firebase.database.ValueEventListener;
 
 
 public class MainActivity extends AppCompatActivity {
 
 
     // UI Bileşenleri
+    private InterstitialAd mInterstitialAd;
+    private static final String REKLAM_UNIT_ID = "ca-app-pub-3937517731332240/8445105806"; // Test reklam ID'si
+    private boolean reklamGosteriliyor = false;
+    private boolean isAdMobInitialized = false;
     private TextView levelTextView;
     private Button resetButton;
     private FirebaseAuth mAuth;
@@ -111,20 +131,180 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_main);
-        mAuth = FirebaseAuth.getInstance();
-        if (mAuth.getCurrentUser() == null) {
-            signInAnonymously();
+        try {
+            setContentView(R.layout.activity_main);
+
+            // AdMob'u güvenli bir şekilde başlat
+            initializeAdMobSafely();
+
+            // Diğer başlatmalar...
+            mAuth = FirebaseAuth.getInstance();
+            if (mAuth.getCurrentUser() == null) {
+                signInAnonymously();
+            }
+            checkPlayerName();
+
+            initializeViews();
+            loadSavedGame();
+            loadSettings();
+            initializeGame();
+            setupListeners();
+            initializeSounds();
+
+        } catch (Exception e) {
+            Log.e("MainActivity", "onCreate hatası: ", e);
+            Toast.makeText(this, "Uygulama başlatılırken bir hata oluştu", Toast.LENGTH_LONG).show();
+            finish();
         }
-        checkPlayerName();
+    }
+    private void loadAd() {
+        AdRequest adRequest = new AdRequest.Builder().build();
 
+        // Test ID yerine gerçek Interstitial Ad ID'nizi kullanın
+        InterstitialAd.load(this, "ca-app-pub-3937517731332240/8445105806", adRequest,
+                new InterstitialAdLoadCallback() {
+                    @Override
+                    public void onAdLoaded(@NonNull InterstitialAd interstitialAd) {
+                        mInterstitialAd = interstitialAd;
+                        reklamGeriCagrimlariniAyarla();
+                    }
 
-        initializeViews();
-        loadSavedGame();
-        loadSettings(); // Ayarları yükle
-        initializeGame();
-        setupListeners();
-        initializeSounds();
+                    @Override
+                    public void onAdFailedToLoad(@NonNull LoadAdError loadAdError) {
+                        mInterstitialAd = null;
+                        redirectToMainMenu();
+                    }
+                });
+    }
+    private void initializeAdMobSafely() {
+        try {
+            MobileAds.initialize(this, initializationStatus -> {
+                isAdMobInitialized = true;
+                Log.d("MainActivity", "AdMob başarıyla başlatıldı");
+                // İlk reklamı yükle
+                reklamYukle();
+            });
+        } catch (Exception e) {
+            Log.e("MainActivity", "AdMob başlatma hatası: ", e);
+            isAdMobInitialized = false;
+        }
+    }
+
+    private void reklamYukle() {
+        if (!isAdMobInitialized) {
+            Log.w("MainActivity", "AdMob başlatılmamış, reklam yüklenemiyor");
+            return;
+        }
+
+        try {
+            AdRequest reklamIstegi = new AdRequest.Builder().build();
+            InterstitialAd.load(this, REKLAM_UNIT_ID, reklamIstegi,
+                    new InterstitialAdLoadCallback() {
+                        @Override
+                        public void onAdLoaded(@NonNull InterstitialAd interstitialAd) {
+                            mInterstitialAd = interstitialAd;
+                            reklamGeriCagrimlariniAyarla();
+                            Log.d("MainActivity", "Reklam başarıyla yüklendi");
+                        }
+
+                        @Override
+                        public void onAdFailedToLoad(@NonNull LoadAdError yuklemHatasi) {
+                            Log.w("MainActivity", "Reklam yüklenemedi: " + yuklemHatasi.getMessage());
+                            mInterstitialAd = null;
+                            // 30 saniye sonra tekrar dene
+                            new Handler().postDelayed(() -> reklamYukle(), 30000);
+                        }
+                    });
+        } catch (Exception e) {
+            Log.e("MainActivity", "Reklam yükleme hatası: ", e);
+            mInterstitialAd = null;
+        }
+    }
+
+    private void reklamGeriCagrimlariniAyarla() {
+        if (mInterstitialAd == null) return;
+
+        try {
+            mInterstitialAd.setFullScreenContentCallback(new FullScreenContentCallback() {
+                @Override
+                public void onAdDismissedFullScreenContent() {
+                    Log.d("MainActivity", "Reklam kapatıldı");
+                    mInterstitialAd = null;
+                    reklamGosteriliyor = false;
+                    reklamYukle(); // Sonraki reklamı yükle
+
+                    // Oyun bittiyse ana menüye yönlendir
+                    if (!isGameActive) {
+                        redirectToMainMenu();
+                    } else {
+                        // Normal oyun akışında devam et
+                        oyunAkisiniDevamEttir(false);
+                    }
+                }
+
+                @Override
+                public void onAdFailedToShowFullScreenContent(AdError adError) {
+                    Log.w("MainActivity", "Reklam gösterilemedi: " + adError.getMessage());
+                    mInterstitialAd = null;
+                    reklamGosteriliyor = false;
+
+                    // Oyun bittiyse ana menüye yönlendir
+                    if (!isGameActive) {
+                        redirectToMainMenu();
+                    } else {
+                        // Normal oyun akışında devam et
+                        oyunAkisiniDevamEttir(false);
+                    }
+                }
+
+                @Override
+                public void onAdShowedFullScreenContent() {
+                    Log.d("MainActivity", "Reklam gösteriliyor");
+                    reklamGosteriliyor = true;
+                }
+            });
+        } catch (Exception e) {
+            Log.e("MainActivity", "Reklam callback hatası: ", e);
+            // Hata durumunda ana menüye yönlendir
+            if (!isGameActive) {
+                redirectToMainMenu();
+            } else {
+                oyunAkisiniDevamEttir(false);
+            }
+        }
+    }
+
+    // Reklam gösterme metodu
+    private void reklamGoster() {
+        if (mInterstitialAd != null) {
+            stopTimer(); // Timer'ı durdur
+            mInterstitialAd.show(this);
+        } else {
+            oyunAkisiniDevamEttir(false);
+        }
+    }
+
+    // Oyun akışını devam ettirme yardımcı metodu
+    private void oyunAkisiniDevamEttir(boolean goToMainMenu) {
+        runOnUiThread(() -> {
+            try {
+                if (goToMainMenu) {
+                    redirectToMainMenu();
+                } else {
+                    if (isGameActive) {
+                        // Yeni seviyeyi başlat
+                        startNewLevel();
+                    } else {
+                        isGameActive = true;
+                        mixButton.setText("Karıştır");
+                        updateLevelUI();
+                        startTimer();
+                    }
+                }
+            } catch (Exception e) {
+                Log.e("MainActivity", "Oyun akışı devam ettirme hatası: ", e);
+            }
+        });
     }
     private void signInAnonymously() {
         mAuth.signInAnonymously()
@@ -356,6 +536,8 @@ public class MainActivity extends AppCompatActivity {
         editor.putInt(KEY_LEVEL, currentLevel);
         editor.putInt(KEY_SCORE, score);
         editor.apply();
+
+        Log.d("MainActivity", "Oyun durumu kaydedildi - Seviye: " + currentLevel + ", Skor: " + score);
     }
     private void resetMixture() {
         // Karışımı ve şişeleri sıfırlar ama oyunu yeniden başlatmaz
@@ -529,7 +711,6 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void startNewLevel() {
-
         currentMixture.clear();
         resetBottles();
         stopTimer();
@@ -537,6 +718,7 @@ public class MainActivity extends AppCompatActivity {
         isGameActive = true;
         mixButton.setText("Karıştır");
 
+        // Seviyeye göre malzeme sayısını belirle
         int numIngredients = Math.min(2 + currentLevel / 2, 5);
 
         previousLevelIngredients.clear();
@@ -550,9 +732,15 @@ public class MainActivity extends AppCompatActivity {
             currentLevelIngredients.add(shuffledIngredients.get(i));
         }
 
+        // UI'ı güncelle
         updateUIForNewLevel(numIngredients);
         generateCustomerRequest(numIngredients);
+
+        // Timer'ı başlat
         startTimer();
+
+        // Level ve skor bilgisini güncelle
+        updateLevelUI();
     }
 
     private void updateUIForNewLevel(int numIngredients) {
@@ -620,8 +808,11 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void startTimer() {
-        stopTimer();
+        stopTimer(); // Önceki timer'ı durdur
+
+        // Her zaman seviyeye göre yeni süre hesapla
         timeRemaining = Math.max(20, 60 - (currentLevel * 2));
+
         timerProgressBar.setMax(timeRemaining);
         timerProgressBar.setProgress(timeRemaining);
         timerRunning = true;
@@ -684,16 +875,33 @@ public class MainActivity extends AppCompatActivity {
 
         playLevelCompleteSound();
 
-        Toast.makeText(this, "Harika! Doğruluk: %" + accuracy + "\nKazanılan puan: " +
-                levelScore, Toast.LENGTH_LONG).show();
+        // Seviye artışını burada yapalım
+        int newLevel = currentLevel + 1;
 
-        currentLevel++;
+        Toast.makeText(this, "Harika! Doğruluk: %" + accuracy +
+                "\nKazanılan puan: " + levelScore +
+                "\nYeni Seviye: " + newLevel, Toast.LENGTH_LONG).show();
+
+        // Seviyeyi güncelle
+        currentLevel = newLevel;
+
+        // Oyun durumunu kaydet
         saveGameState();
+
+        // UI'ı güncelle
         updateLevelUI();
         resetBottles();
 
-        isGameActive = false;
-        mixButton.setText("Sonraki Seviye");
+        isGameActive = true;
+        mixButton.setText("Karıştır");
+
+        // Her 3 seviyede bir reklam göster
+        if (currentLevel % 3 == 0) {
+            reklamGoster();
+        } else {
+            // Yeni seviyeyi başlat
+            startNewLevel();
+        }
     }
 
     private void resetBottles() {
@@ -735,56 +943,35 @@ public class MainActivity extends AppCompatActivity {
             playTimeUpSound();
         }
 
-        if (score > 0) {
-            FirebaseUser currentUser = mAuth.getCurrentUser();
-            if (currentUser != null) {
-                SharedPreferences prefs = getSharedPreferences(PLAYER_NAME_PREF, MODE_PRIVATE);
-                String currentPlayerName = prefs.getString(KEY_PLAYER_NAME, "Anonim");
-
-                // Firebase'e skoru kaydet
-                ScoreEntry newScore = new ScoreEntry(
-                        currentPlayerName,
-                        score,
-                        new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date())
-                );
-
-                DatabaseReference scoresRef = FirebaseDatabase.getInstance()
-                        .getReference("scores");
-
-                scoresRef.push().setValue(newScore)
-                        .addOnSuccessListener(aVoid -> {
-                            Toast.makeText(MainActivity.this,
-                                    "Skorunuz başarıyla kaydedildi!",
-                                    Toast.LENGTH_SHORT).show();
-
-                            // Score saved successfully, now redirect to main menu
-                            redirectToMainMenu();
-                        })
-                        .addOnFailureListener(e -> {
-                            Toast.makeText(MainActivity.this,
-                                    "Skor kaydedilirken hata oluştu: " + e.getMessage(),
-                                    Toast.LENGTH_SHORT).show();
-
-                            // Even if score saving fails, redirect to main menu
-                            redirectToMainMenu();
-                        });
-            } else {
-                // No user is logged in, redirect to main menu directly
-                redirectToMainMenu();
-            }
-        } else {
-            // No score to save, redirect to main menu directly
-            redirectToMainMenu();
-        }
-
         String message = completed ?
                 "Tebrikler! Oyunu tamamladınız.\nToplam Puan: " + score :
                 "Süre doldu! Oyun bitti.\nToplam Puan: " + score;
 
         Toast.makeText(this, message, Toast.LENGTH_LONG).show();
 
-        // The following code is no longer needed since we're redirecting to the main menu
-        // mixButton.setText("Yeni Oyun");
+        // Skoru kaydet
+        if (score > 0) {
+            FirebaseUser currentUser = mAuth.getCurrentUser();
+            if (currentUser != null) {
+                SharedPreferences prefs = getSharedPreferences(PLAYER_NAME_PREF, MODE_PRIVATE);
+                String currentPlayerName = prefs.getString(KEY_PLAYER_NAME, "Anonim");
+                saveHighScore(currentPlayerName, score);
+            } else {
+                if (mInterstitialAd != null) {
+                    reklamGoster();
+                } else {
+                    redirectToMainMenu();
+                }
+            }
+        } else {
+            if (mInterstitialAd != null) {
+                reklamGoster();
+            } else {
+                redirectToMainMenu();
+            }
+        }
+
+        // Oyun verilerini sıfırla
         previousLevelIngredients.clear();
         previousRequestedMixture.clear();
         previousCustomerRequest = "";
@@ -793,26 +980,107 @@ public class MainActivity extends AppCompatActivity {
         saveGameState();
     }
 
+
+
+
     /**
      * Redirects the user to the main menu activity
      */
     private void redirectToMainMenu() {
-        // Create an intent to start the MainMenuActivity
         Intent intent = new Intent(MainActivity.this, MainMenuActivity.class);
-
-        // You can pass any relevant data to the main menu if needed
         intent.putExtra("LAST_SCORE", score);
-
-        // Start the activity
         startActivity(intent);
+        finish(); // Activity'yi kapat
+    }
+    private void saveHighScore(String playerName, int newScore) {
+        DatabaseReference scoresRef = FirebaseDatabase.getInstance().getReference("scores");
 
-        // Finish this activity so pressing back won't return to the game
-        finish();
+        scoresRef.orderByChild("playerName").equalTo(playerName)
+                .addListenerForSingleValueEvent(new ValueEventListener() {
+                    @Override
+                    public void onDataChange(@NonNull DataSnapshot dataSnapshot) {
+                        String oldScoreKey = null;
+                        int oldScore = 0;
+
+                        // Kullanıcının mevcut skorunu kontrol et
+                        for (DataSnapshot scoreSnapshot : dataSnapshot.getChildren()) {
+                            ScoreEntry existingScore = scoreSnapshot.getValue(ScoreEntry.class);
+                            if (existingScore != null) {
+                                oldScoreKey = scoreSnapshot.getKey();
+                                oldScore = existingScore.getScore();
+                                break;
+                            }
+                        }
+
+                        // Yeni skor daha yüksekse veya önceki skor yoksa
+                        if (oldScoreKey == null || newScore > oldScore) {
+                            // Eski skoru sil (varsa)
+                            if (oldScoreKey != null) {
+                                scoresRef.child(oldScoreKey).removeValue();
+                            }
+
+                            // Yeni skoru kaydet
+                            ScoreEntry newScoreEntry = new ScoreEntry(
+                                    playerName,
+                                    newScore,
+                                    new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date())
+                            );
+
+                            scoresRef.push().setValue(newScoreEntry)
+                                    .addOnSuccessListener(aVoid -> {
+                                        Log.d("MainActivity", "Yeni yüksek skor kaydedildi!");
+                                        Toast.makeText(MainActivity.this,
+                                                "Yeni yüksek skor kaydedildi!",
+                                                Toast.LENGTH_SHORT).show();
+                                        if (mInterstitialAd != null) {
+                                            reklamGoster();
+                                        } else {
+                                            redirectToMainMenu();
+                                        }
+                                    })
+                                    .addOnFailureListener(e -> {
+                                        Log.e("MainActivity", "Skor kaydedilemedi: " + e.getMessage());
+                                        if (mInterstitialAd != null) {
+                                            reklamGoster();
+                                        } else {
+                                            redirectToMainMenu();
+                                        }
+                                    });
+                        } else {
+                            // Yeni skor daha düşükse
+                            Log.d("MainActivity", "Yeni skor mevcut yüksek skordan düşük");
+                            if (mInterstitialAd != null) {
+                                reklamGoster();
+                            } else {
+                                redirectToMainMenu();
+                            }
+                        }
+                    }
+
+                    @Override
+                    public void onCancelled(@NonNull DatabaseError error) {
+                        // Veritabanı hatası durumunda
+                        Log.e("MainActivity", "Firebase hatası: " + error.getMessage());
+                        Toast.makeText(MainActivity.this,
+                                "Skor kaydedilirken bir hata oluştu",
+                                Toast.LENGTH_SHORT).show();
+                        if (mInterstitialAd != null) {
+                            reklamGoster();
+                        } else {
+                            redirectToMainMenu();
+                        }
+                    }
+                });
     }
 
+
+
     private void updateLevelUI() {
-        levelTextView.setText("Seviye: " + currentLevel);
-        scoreTextView.setText("Puan: " + score);
+        runOnUiThread(() -> {
+            levelTextView.setText("Seviye: " + currentLevel);
+            scoreTextView.setText("Puan: " + score);
+            Log.d("MainActivity", "Seviye güncellendi: " + currentLevel);
+        });
     }
 
     @Override
@@ -837,41 +1105,53 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
-        loadSettings(); // Ayarları tekrar yükle
-        if (isGameActive) {
-            startTimer();
-        }
-
-        if (backgroundMusicPlayer != null && !backgroundMusicPlayer.isPlaying() && isMusicEnabled) {
-            backgroundMusicPlayer.start();
+        try {
+            loadSettings();
+            // Reklam yüklü değilse ve gösterilmiyorsa ve AdMob başlatıldıysa yeni reklam yükle
+            if (mInterstitialAd == null && !reklamGosteriliyor && isAdMobInitialized) {
+                reklamYukle();
+            }
+            if (isGameActive) {
+                startTimer();
+            }
+            if (backgroundMusicPlayer != null && !backgroundMusicPlayer.isPlaying() && isMusicEnabled) {
+                backgroundMusicPlayer.start();
+            }
+        } catch (Exception e) {
+            Log.e("MainActivity", "onResume hatası: ", e);
         }
     }
 
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        stopTimer();
-        saveGameState();
+        try {
+            stopTimer();
+            saveGameState();
+            mInterstitialAd = null;
+            isAdMobInitialized = false;
 
-        if (backgroundMusicPlayer != null) {
-            backgroundMusicPlayer.stop();
-            backgroundMusicPlayer.release();
-            backgroundMusicPlayer = null;
-        }
+            if (backgroundMusicPlayer != null) {
+                backgroundMusicPlayer.stop();
+                backgroundMusicPlayer.release();
+                backgroundMusicPlayer = null;
+            }
 
-        if (levelCompleteSound != null) {
-            levelCompleteSound.release();
-            levelCompleteSound = null;
-        }
+            if (levelCompleteSound != null) {
+                levelCompleteSound.release();
+                levelCompleteSound = null;
+            }
 
-        if (timeUpSound != null) {
-            timeUpSound.release();
-            timeUpSound = null;
-        }
+            if (timeUpSound != null) {
+                timeUpSound.release();
+                timeUpSound = null;
+            }
 
-        if (pourSound != null) {
-            pourSound.release();
-            pourSound = null;
+            if (pourSound != null) {
+                pourSound.release();
+                pourSound = null;
+            }
+        } catch (Exception e) {
+            Log.e("MainActivity", "onDestroy hatası: ", e);
         }
-    }
-}
+    }}
