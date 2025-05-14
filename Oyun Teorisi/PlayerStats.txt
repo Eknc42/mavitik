@@ -1,0 +1,381 @@
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.UI;
+using TMPro;
+
+public class PlayerStats : MonoBehaviour
+{
+    [Header("Player Statistics")]
+    [SerializeField] private TextMeshProUGUI totalGamesPlayedText;
+    [SerializeField] private TextMeshProUGUI winRatioText;
+    [SerializeField] private TextMeshProUGUI highScoreText;
+    [SerializeField] private TextMeshProUGUI cooperationRateText;
+    [SerializeField] private TextMeshProUGUI averageScoreText;
+    
+    [Header("Game Statistics Panel")]
+    [SerializeField] private GameObject statsPanel;
+    [SerializeField] private Button closeStatsButton;
+    [SerializeField] private Button showStatsButton;
+    
+    [Header("Achievement Tracking")]
+    [SerializeField] private GameObject achievementsPanel;
+    [SerializeField] private Button closeAchievementsButton;
+    [SerializeField] private Button showAchievementsButton;
+    [SerializeField] private RectTransform achievementsContent;
+    [SerializeField] private GameObject achievementPrefab;
+    
+    private PlayerData playerData;
+    private List<Achievement> achievements = new List<Achievement>();
+    
+    private void Start()
+    {
+        // Initialize player data
+        LoadPlayerData();
+        
+        // Set up buttons
+        closeStatsButton.onClick.AddListener(CloseStatsPanel);
+        showStatsButton.onClick.AddListener(ShowStatsPanel);
+        closeAchievementsButton.onClick.AddListener(CloseAchievementsPanel);
+        showAchievementsButton.onClick.AddListener(ShowAchievementsPanel);
+        
+        // Initialize achievements
+        InitializeAchievements();
+        
+        // Hide panels at start
+        statsPanel.SetActive(false);
+        achievementsPanel.SetActive(false);
+    }
+    
+    private void InitializeAchievements()
+    {
+        // Define all achievements
+        achievements.Add(new Achievement {
+            Id = "first_game",
+            Title = "İlk Oyun",
+            Description = "İlk oyununu oyna",
+            IsUnlocked = playerData.GamesPlayed > 0,
+            Icon = Resources.Load<Sprite>("Achievements/first_game")
+        });
+        
+        achievements.Add(new Achievement {
+            Id = "cooperation_master",
+            Title = "İşbirliği Ustası",
+            Description = "Bir oyunda 5 kez işbirliği yap",
+            IsUnlocked = playerData.MaxCooperationStreak >= 5,
+            Icon = Resources.Load<Sprite>("Achievements/cooperation")
+        });
+        
+        achievements.Add(new Achievement {
+            Id = "cheat_master",
+            Title = "Hile Ustası",
+            Description = "Bir oyunda 5 kez hile yap",
+            IsUnlocked = playerData.MaxCheatStreak >= 5,
+            Icon = Resources.Load<Sprite>("Achievements/cheat")
+        });
+        
+        achievements.Add(new Achievement {
+            Id = "high_score",
+            Title = "Yüksek Puan",
+            Description = "20 puanı geç",
+            IsUnlocked = playerData.HighScore >= 20,
+            Icon = Resources.Load<Sprite>("Achievements/high_score")
+        });
+        
+        achievements.Add(new Achievement {
+            Id = "first_place",
+            Title = "Birinci",
+            Description = "Bir oyunda birinci ol",
+            IsUnlocked = playerData.FirstPlaceCount > 0,
+            Icon = Resources.Load<Sprite>("Achievements/first_place")
+        });
+        
+        achievements.Add(new Achievement {
+            Id = "games_10",
+            Title = "Tecrübeli Oyuncu",
+            Description = "10 oyun oyna",
+            IsUnlocked = playerData.GamesPlayed >= 10,
+            Icon = Resources.Load<Sprite>("Achievements/games_10")
+        });
+        
+        achievements.Add(new Achievement {
+            Id = "balanced_player",
+            Title = "Dengeli Oyuncu",
+            Description = "İşbirliği oranın %45-%55 arasında olsun",
+            IsUnlocked = playerData.CooperationRate >= 0.45f && playerData.CooperationRate <= 0.55f && playerData.GamesPlayed >= 5,
+            Icon = Resources.Load<Sprite>("Achievements/balanced_player")
+        });
+        
+        achievements.Add(new Achievement {
+            Id = "betrayer",
+            Title = "Hain",
+            Description = "Rakibin işbirliği yaparken ona hile yap",
+            IsUnlocked = playerData.OpponentCooperatePlayerCheatCount > 0,
+            Icon = Resources.Load<Sprite>("Achievements/betrayer")
+        });
+        
+        // Generate achievement UI elements
+        PopulateAchievementsPanel();
+    }
+    
+    private void PopulateAchievementsPanel()
+    {
+        // Clear existing achievement items
+        foreach (Transform child in achievementsContent)
+        {
+            Destroy(child.gameObject);
+        }
+        
+        // Add achievement items
+        for (int i = 0; i < achievements.Count; i++)
+        {
+            GameObject achievementItem = Instantiate(achievementPrefab, achievementsContent);
+            AchievementUI achievementUI = achievementItem.GetComponent<AchievementUI>();
+            
+            if (achievementUI != null)
+            {
+                achievementUI.SetAchievement(achievements[i]);
+            }
+        }
+    }
+    
+    public void UpdateStats(GameResult result)
+    {
+        // Update player data
+        playerData.GamesPlayed++;
+        playerData.TotalScore += result.FinalScore;
+        
+        if (result.FinalScore > playerData.HighScore)
+        {
+            playerData.HighScore = result.FinalScore;
+        }
+        
+        if (result.PlayerRank == 1)
+        {
+            playerData.FirstPlaceCount++;
+        }
+        
+        // Update cooperation rate
+        int totalMoves = result.CooperateCount + result.CheatCount;
+        if (totalMoves > 0)
+        {
+            float gameCooperationRate = (float)result.CooperateCount / totalMoves;
+            // Moving average of cooperation rate
+            playerData.CooperationRate = (playerData.CooperationRate * (playerData.GamesPlayed - 1) + gameCooperationRate) / playerData.GamesPlayed;
+        }
+        
+        // Update streaks
+        if (result.MaxCooperationStreak > playerData.MaxCooperationStreak)
+        {
+            playerData.MaxCooperationStreak = result.MaxCooperationStreak;
+        }
+        
+        if (result.MaxCheatStreak > playerData.MaxCheatStreak)
+        {
+            playerData.MaxCheatStreak = result.MaxCheatStreak;
+        }
+        
+        // Update betrayal count
+        playerData.OpponentCooperatePlayerCheatCount += result.OpponentCooperatePlayerCheatCount;
+        
+        // Save updated data
+        SavePlayerData();
+        
+        // Update achievement status
+        UpdateAchievements();
+        
+        // Update UI
+        UpdateStatsUI();
+    }
+    
+    private void UpdateAchievements()
+    {
+        bool hasUnlockedNew = false;
+        
+        foreach (Achievement achievement in achievements)
+        {
+            if (!achievement.IsUnlocked)
+            {
+                // Check each achievement condition
+                switch (achievement.Id)
+                {
+                    case "first_game":
+                        achievement.IsUnlocked = playerData.GamesPlayed > 0;
+                        break;
+                    case "cooperation_master":
+                        achievement.IsUnlocked = playerData.MaxCooperationStreak >= 5;
+                        break;
+                    case "cheat_master":
+                        achievement.IsUnlocked = playerData.MaxCheatStreak >= 5;
+                        break;
+                    case "high_score":
+                        achievement.IsUnlocked = playerData.HighScore >= 20;
+                        break;
+                    case "first_place":
+                        achievement.IsUnlocked = playerData.FirstPlaceCount > 0;
+                        break;
+                    case "games_10":
+                        achievement.IsUnlocked = playerData.GamesPlayed >= 10;
+                        break;
+                    case "balanced_player":
+                        achievement.IsUnlocked = playerData.CooperationRate >= 0.45f && playerData.CooperationRate <= 0.55f && playerData.GamesPlayed >= 5;
+                        break;
+                    case "betrayer":
+                        achievement.IsUnlocked = playerData.OpponentCooperatePlayerCheatCount > 0;
+                        break;
+                }
+                
+                if (achievement.IsUnlocked)
+                {
+                    hasUnlockedNew = true;
+                }
+            }
+        }
+        
+        // If new achievements unlocked, show notification
+        if (hasUnlockedNew)
+        {
+            ShowAchievementNotification();
+            // Update UI
+            PopulateAchievementsPanel();
+        }
+    }
+    
+    private void ShowAchievementNotification()
+    {
+        // Find UIManager and show notification
+        UIManager uiManager = FindObjectOfType<UIManager>();
+        if (uiManager != null)
+        {
+            uiManager.ShowNotification("Yeni başarı açıldı! Başarılar bölümünü kontrol et.");
+        }
+    }
+    
+    private void UpdateStatsUI()
+    {
+        totalGamesPlayedText.text = "Oynan Oyun: " + playerData.GamesPlayed;
+        
+        float winRate = playerData.GamesPlayed > 0 ? (float)playerData.FirstPlaceCount / playerData.GamesPlayed * 100 : 0;
+        winRatioText.text = "Kazanma Oranı: %" + winRate.ToString("F1");
+        
+        highScoreText.text = "En Yüksek Puan: " + playerData.HighScore;
+        
+        cooperationRateText.text = "İşbirliği Oranı: %" + (playerData.CooperationRate * 100).ToString("F1");
+        
+        float avgScore = playerData.GamesPlayed > 0 ? (float)playerData.TotalScore / playerData.GamesPlayed : 0;
+        averageScoreText.text = "Ortalama Puan: " + avgScore.ToString("F1");
+    }
+    
+    private void LoadPlayerData()
+    {
+        if (PlayerPrefs.HasKey("PlayerData"))
+        {
+            string jsonData = PlayerPrefs.GetString("PlayerData");
+            playerData = JsonUtility.FromJson<PlayerData>(jsonData);
+        }
+        else
+        {
+            // Initialize new player data
+            playerData = new PlayerData
+            {
+                GamesPlayed = 0,
+                TotalScore = 0,
+                HighScore = 0,
+                FirstPlaceCount = 0,
+                CooperationRate = 0,
+                MaxCooperationStreak = 0,
+                MaxCheatStreak = 0,
+                OpponentCooperatePlayerCheatCount = 0
+            };
+            
+            SavePlayerData();
+        }
+        
+        UpdateStatsUI();
+    }
+    
+    private void SavePlayerData()
+    {
+        string jsonData = JsonUtility.ToJson(playerData);
+        PlayerPrefs.SetString("PlayerData", jsonData);
+        PlayerPrefs.Save();
+    }
+    
+    private void ShowStatsPanel()
+    {
+        statsPanel.SetActive(true);
+    }
+    
+    private void CloseStatsPanel()
+    {
+        statsPanel.SetActive(false);
+    }
+    
+    private void ShowAchievementsPanel()
+    {
+        achievementsPanel.SetActive(true);
+    }
+    
+    private void CloseAchievementsPanel()
+    {
+        achievementsPanel.SetActive(false);
+    }
+}
+
+// Data classes
+[System.Serializable]
+public class PlayerData
+{
+    public int GamesPlayed;
+    public int TotalScore;
+    public int HighScore;
+    public int FirstPlaceCount;
+    public float CooperationRate;
+    public int MaxCooperationStreak;
+    public int MaxCheatStreak;
+    public int OpponentCooperatePlayerCheatCount;
+}
+
+[System.Serializable]
+public class GameResult
+{
+    public int FinalScore;
+    public int PlayerRank;
+    public int CooperateCount;
+    public int CheatCount;
+    public int MaxCooperationStreak;
+    public int MaxCheatStreak;
+    public int OpponentCooperatePlayerCheatCount;
+}
+
+[System.Serializable]
+public class Achievement
+{
+    public string Id;
+    public string Title;
+    public string Description;
+    public bool IsUnlocked;
+    public Sprite Icon;
+}
+
+// Helper component for achievement UI items
+public class AchievementUI : MonoBehaviour
+{
+    [SerializeField] private Image achievementIcon;
+    [SerializeField] private TextMeshProUGUI achievementTitle;
+    [SerializeField] private TextMeshProUGUI achievementDescription;
+    [SerializeField] private GameObject lockedOverlay;
+    
+    public void SetAchievement(Achievement achievement)
+    {
+        achievementTitle.text = achievement.Title;
+        achievementDescription.text = achievement.Description;
+        
+        if (achievement.Icon != null)
+        {
+            achievementIcon.sprite = achievement.Icon;
+        }
+        
+        lockedOverlay.SetActive(!achievement.IsUnlocked);
+    }
+}

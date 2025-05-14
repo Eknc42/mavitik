@@ -1,0 +1,134 @@
+using UnityEngine;
+using UnityEngine.Audio;
+
+public class SettingsManager : MonoBehaviour
+{
+    public static SettingsManager Instance;
+    
+    [Header("Audio Mixers")]
+    [SerializeField] private AudioMixer audioMixer;
+    
+    // Settings
+    public float MusicVolume { get; private set; }
+    public float SfxVolume { get; private set; }
+    public float GameSpeed { get; private set; }
+    public bool VibrationEnabled { get; private set; }
+    
+    // Constants
+    private const string MUSIC_VOLUME_KEY = "MusicVolume";
+    private const string SFX_VOLUME_KEY = "SFXVolume";
+    private const string GAME_SPEED_KEY = "GameSpeed";
+    private const string VIBRATION_KEY = "Vibration";
+    
+    private void Awake()
+    {
+        // Singleton pattern
+        if (Instance == null)
+        {
+            Instance = this;
+            DontDestroyOnLoad(gameObject);
+            LoadSettings();
+        }
+        else
+        {
+            Destroy(gameObject);
+        }
+    }
+    
+    private void LoadSettings()
+    {
+        // Load settings from PlayerPrefs
+        MusicVolume = PlayerPrefs.GetFloat(MUSIC_VOLUME_KEY, 0.8f);
+        SfxVolume = PlayerPrefs.GetFloat(SFX_VOLUME_KEY, 1.0f);
+        GameSpeed = PlayerPrefs.GetFloat(GAME_SPEED_KEY, 1.0f);
+        VibrationEnabled = PlayerPrefs.GetInt(VIBRATION_KEY, 1) == 1;
+        
+        // Apply settings
+        ApplySettings();
+    }
+    
+    private void ApplySettings()
+    {
+        // Apply audio settings to mixer if available
+        if (audioMixer != null)
+        {
+            // Convert slider value (0-1) to decibel range (-80dB to 0dB)
+            float musicVolumeDB = Mathf.Log10(Mathf.Max(0.0001f, MusicVolume)) * 20;
+            float sfxVolumeDB = Mathf.Log10(Mathf.Max(0.0001f, SfxVolume)) * 20;
+            
+            audioMixer.SetFloat("MusicVolume", musicVolumeDB);
+            audioMixer.SetFloat("SFXVolume", sfxVolumeDB);
+        }
+        
+        // Apply game speed
+        Time.timeScale = GameSpeed;
+        
+        // Apply vibration setting
+        #if UNITY_ANDROID || UNITY_IOS
+        Handheld.vibrate = VibrationEnabled;
+        #endif
+    }
+    
+    public void SetMusicVolume(float volume)
+    {
+        MusicVolume = volume;
+        PlayerPrefs.SetFloat(MUSIC_VOLUME_KEY, volume);
+        
+        if (audioMixer != null)
+        {
+            float volumeDB = Mathf.Log10(Mathf.Max(0.0001f, volume)) * 20;
+            audioMixer.SetFloat("MusicVolume", volumeDB);
+        }
+    }
+    
+    public void SetSfxVolume(float volume)
+    {
+        SfxVolume = volume;
+        PlayerPrefs.SetFloat(SFX_VOLUME_KEY, volume);
+        
+        if (audioMixer != null)
+        {
+            float volumeDB = Mathf.Log10(Mathf.Max(0.0001f, volume)) * 20;
+            audioMixer.SetFloat("SFXVolume", volumeDB);
+        }
+    }
+    
+    public void SetGameSpeed(float speed)
+    {
+        GameSpeed = speed;
+        PlayerPrefs.SetFloat(GAME_SPEED_KEY, speed);
+        Time.timeScale = speed;
+    }
+    
+    public void SetVibration(bool enabled)
+    {
+        VibrationEnabled = enabled;
+        PlayerPrefs.SetInt(VIBRATION_KEY, enabled ? 1 : 0);
+        
+        #if UNITY_ANDROID || UNITY_IOS
+        Handheld.vibrate = enabled;
+        #endif
+    }
+    
+    public void SaveSettings()
+    {
+        PlayerPrefs.SetFloat(MUSIC_VOLUME_KEY, MusicVolume);
+        PlayerPrefs.SetFloat(SFX_VOLUME_KEY, SfxVolume);
+        PlayerPrefs.SetFloat(GAME_SPEED_KEY, GameSpeed);
+        PlayerPrefs.SetInt(VIBRATION_KEY, VibrationEnabled ? 1 : 0);
+        PlayerPrefs.Save();
+    }
+    
+    private void OnApplicationQuit()
+    {
+        SaveSettings();
+    }
+    
+    private void OnApplicationPause(bool pause)
+    {
+        if (pause)
+        {
+            SaveSettings();
+        }
+    }
+}

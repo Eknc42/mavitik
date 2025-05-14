@@ -1,0 +1,181 @@
+using UnityEngine;
+using UnityEngine.UI;
+using TMPro;
+
+public class UIManager : MonoBehaviour
+{
+    [Header("References")]
+    [SerializeField] private GameManager gameManager;
+    
+    [Header("Main Menu")]
+    [SerializeField] private Button startGameButton;
+    [SerializeField] private Button howToPlayButton;
+    [SerializeField] private GameObject howToPlayPanel;
+    [SerializeField] private Button closeHowToPlayButton;
+    
+    [Header("Game Panels Animation")]
+    [SerializeField] private Animator mainMenuAnimator;
+    [SerializeField] private Animator gameScreenAnimator;
+    [SerializeField] private Animator resultScreenAnimator;
+    [SerializeField] private Animator finalScreenAnimator;
+    
+    [Header("Choice Feedback")]
+    [SerializeField] private Animator cooperateButtonAnimator;
+    [SerializeField] private Animator cheatButtonAnimator;
+    [SerializeField] private ParticleSystem cooperateParticles;
+    [SerializeField] private ParticleSystem cheatParticles;
+    
+    [Header("Notifications")]
+    [SerializeField] private GameObject notificationPanel;
+    [SerializeField] private TextMeshProUGUI notificationText;
+    [SerializeField] private Button notificationCloseButton;
+    
+    [Header("Result Feedback")]
+    [SerializeField] private Animator playerChoiceAnimator;
+    [SerializeField] private Animator opponentChoiceAnimator;
+    [SerializeField] private ParticleSystem positiveResultParticles;
+    [SerializeField] private ParticleSystem negativeResultParticles;
+    
+    [Header("Audio")]
+    [SerializeField] private AudioSource musicSource;
+    [SerializeField] private AudioSource effectsSource;
+    [SerializeField] private AudioClip buttonClickSound;
+    [SerializeField] private AudioClip cooperateSound;
+    [SerializeField] private AudioClip cheatSound;
+    [SerializeField] private AudioClip positiveResultSound;
+    [SerializeField] private AudioClip negativeResultSound;
+    [SerializeField] private AudioClip timerTickSound;
+    
+    private void Start()
+    {
+        SetupButtons();
+        CloseNotification();
+        CloseHowToPlay();
+    }
+    
+    private void SetupButtons()
+    {
+        startGameButton.onClick.AddListener(() => {
+            PlayButtonSound();
+            gameManager.StartGame();
+        });
+        
+        howToPlayButton.onClick.AddListener(() => {
+            PlayButtonSound();
+            ShowHowToPlay();
+        });
+        
+        closeHowToPlayButton.onClick.AddListener(() => {
+            PlayButtonSound();
+            CloseHowToPlay();
+        });
+        
+        notificationCloseButton.onClick.AddListener(() => {
+            PlayButtonSound();
+            CloseNotification();
+        });
+    }
+    
+    public void ShowHowToPlay()
+    {
+        howToPlayPanel.SetActive(true);
+    }
+    
+    public void CloseHowToPlay()
+    {
+        howToPlayPanel.SetActive(false);
+    }
+    
+    public void ShowNotification(string message)
+    {
+        notificationText.text = message;
+        notificationPanel.SetActive(true);
+    }
+    
+    public void CloseNotification()
+    {
+        notificationPanel.SetActive(false);
+    }
+    
+    public void PlayCooperateAnimation()
+    {
+        cooperateButtonAnimator.SetTrigger("Selected");
+        cooperateParticles.Play();
+        PlaySound(cooperateSound);
+    }
+    
+    public void PlayCheatAnimation()
+    {
+        cheatButtonAnimator.SetTrigger("Selected");
+        cheatParticles.Play();
+        PlaySound(cheatSound);
+    }
+    
+    public void PlayPositiveResultAnimation()
+    {
+        positiveResultParticles.Play();
+        PlaySound(positiveResultSound);
+    }
+    
+    public void PlayNegativeResultAnimation()
+    {
+        negativeResultParticles.Play();
+        PlaySound(negativeResultSound);
+    }
+    
+    public void PlayButtonSound()
+    {
+        PlaySound(buttonClickSound);
+    }
+    
+    public void PlayTimerTickSound()
+    {
+        if (!effectsSource.isPlaying || effectsSource.clip != timerTickSound)
+        {
+            PlaySound(timerTickSound);
+        }
+    }
+    
+    private void PlaySound(AudioClip clip)
+    {
+        if (clip != null)
+        {
+            effectsSource.clip = clip;
+            effectsSource.Play();
+        }
+    }
+    
+    public void SetMusicVolume(float volume)
+    {
+        musicSource.volume = volume;
+    }
+    
+    public void SetEffectsVolume(float volume)
+    {
+        effectsSource.volume = volume;
+    }
+    
+    public void TransitionToGame()
+    {
+        mainMenuAnimator.SetTrigger("Hide");
+        gameScreenAnimator.SetTrigger("Show");
+    }
+    
+    public void TransitionToResult()
+    {
+        gameScreenAnimator.SetTrigger("Hide");
+        resultScreenAnimator.SetTrigger("Show");
+    }
+    
+    public void TransitionToFinal()
+    {
+        resultScreenAnimator.SetTrigger("Hide");
+        finalScreenAnimator.SetTrigger("Show");
+    }
+    
+    public void TransitionToMainMenu()
+    {
+        finalScreenAnimator.SetTrigger("Hide");
+        mainMenuAnimator.SetTrigger("Show");
+    }
+}

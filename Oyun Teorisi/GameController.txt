@@ -1,0 +1,249 @@
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.SceneManagement;
+using UnityEngine.UI;
+
+public class GameController : MonoBehaviour
+{
+    [Header("Manager References")]
+    [SerializeField] private GameManager gameManager;
+    [SerializeField] private UIManager uiManager;
+    [SerializeField] private OpponentAI opponentAI;
+    [SerializeField] private PlayerStats playerStats;
+    
+    [Header("Game Settings")]
+    [SerializeField] private float roundDelay = 1.0f;
+    [SerializeField] private int maxRounds = 5;
+    [SerializeField] private int maxOpponents = 5;
+    [SerializeField] private float gameSpeed = 1.0f; // For time scaling
+    
+    [Header("Tutorial")]
+    [SerializeField] private GameObject tutorialPanel;
+    [SerializeField] private Button closeTutorialButton;
+    [SerializeField] private Button nextTutorialButton;
+    [SerializeField] private Button prevTutorialButton;
+    [SerializeField] private GameObject[] tutorialPages;
+    private int currentTutorialPage = 0;
+    
+    [Header("Settings")]
+    [SerializeField] private GameObject settingsPanel;
+    [SerializeField] private Button openSettingsButton;
+    [SerializeField] private Button closeSettingsButton;
+    [SerializeField] private Slider musicVolumeSlider;
+    [SerializeField] private Slider sfxVolumeSlider;
+    [SerializeField] private Toggle vibrationToggle;
+    [SerializeField] private Slider gameSpeedSlider;
+    
+    private bool isGameRunning = false;
+    private bool showedTutorial = false;
+    
+    private void Start()
+    {
+        // Load settings
+        LoadSettings();
+        
+        // Set up buttons
+        closeTutorialButton.onClick.AddListener(CloseTutorial);
+        nextTutorialButton.onClick.AddListener(NextTutorialPage);
+        prevTutorialButton.onClick.AddListener(PrevTutorialPage);
+        openSettingsButton.onClick.AddListener(OpenSettings);
+        closeSettingsButton.onClick.AddListener(CloseSettings);
+        
+        // Set up sliders
+        musicVolumeSlider.onValueChanged.AddListener(SetMusicVolume);
+        sfxVolumeSlider.onValueChanged.AddListener(SetSFXVolume);
+        gameSpeedSlider.onValueChanged.AddListener(SetGameSpeed);
+        
+        // Set up toggle
+        vibrationToggle.onValueChanged.AddListener(SetVibration);
+        
+        // Init tutorial
+        tutorialPanel.SetActive(false);
+        settingsPanel.SetActive(false);
+        
+        // Check if first time playing
+        if (!PlayerPrefs.HasKey("TutorialShown"))
+        {
+            StartCoroutine(ShowTutorialAfterDelay());
+            PlayerPrefs.SetInt("TutorialShown", 1);
+            PlayerPrefs.Save();
+        }
+    }
+    
+    private IEnumerator ShowTutorialAfterDelay()
+    {
+        yield return new WaitForSeconds(0.5f);
+        ShowTutorial();
+    }
+    
+    private void LoadSettings()
+    {
+        // Load volume settings
+        float musicVolume = PlayerPrefs.GetFloat("MusicVolume", 0.8f);
+        float sfxVolume = PlayerPrefs.GetFloat("SFXVolume", 1.0f);
+        gameSpeed = PlayerPrefs.GetFloat("GameSpeed", 1.0f);
+        bool vibration = PlayerPrefs.GetInt("Vibration", 1) == 1;
+        
+        // Apply settings
+        musicVolumeSlider.value = musicVolume;
+        sfxVolumeSlider.value = sfxVolume;
+        gameSpeedSlider.value = gameSpeed;
+        vibrationToggle.isOn = vibration;
+        
+        // Set initial values
+        SetMusicVolume(musicVolume);
+        SetSFXVolume(sfxVolume);
+        SetGameSpeed(gameSpeed);
+        SetVibration(vibration);
+    }
+    
+    private void SaveSettings()
+    {
+        PlayerPrefs.SetFloat("MusicVolume", musicVolumeSlider.value);
+        PlayerPrefs.SetFloat("SFXVolume", sfxVolumeSlider.value);
+        PlayerPrefs.SetFloat("GameSpeed", gameSpeedSlider.value);
+        PlayerPrefs.SetInt("Vibration", vibrationToggle.isOn ? 1 : 0);
+        PlayerPrefs.Save();
+    }
+    
+    private void SetMusicVolume(float volume)
+    {
+        uiManager.SetMusicVolume(volume);
+    }
+    
+    private void SetSFXVolume(float volume)
+    {
+        uiManager.SetEffectsVolume(volume);
+    }
+    
+    private void SetGameSpeed(float speed)
+    {
+        gameSpeed = speed;
+        Time.timeScale = speed;
+    }
+    
+    private void SetVibration(bool enabled)
+    {
+        // Handle vibration settings here
+        #if UNITY_ANDROID || UNITY_IOS
+        Handheld.enabledVibration = enabled;
+        #endif
+    }
+    
+    public void StartGame()
+    {
+        isGameRunning = true;
+        
+        // Start game with default settings
+        gameManager.StartGame();
+    }
+    
+    public void EndGame(GameResult result)
+    {
+        isGameRunning = false;
+        
+        // Save results to player stats
+        playerStats.UpdateStats(result);
+        
+        // Show final results
+        gameManager.ShowFinalResults();
+    }
+    
+    public void ShowTutorial()
+    {
+        tutorialPanel.SetActive(true);
+        ShowTutorialPage(0);
+    }
+    
+    private void CloseTutorial()
+    {
+        tutorialPanel.SetActive(false);
+        showedTutorial = true;
+    }
+    
+    private void NextTutorialPage()
+    {
+        ShowTutorialPage(currentTutorialPage + 1);
+    }
+    
+    private void PrevTutorialPage()
+    {
+        ShowTutorialPage(currentTutorialPage - 1);
+    }
+    
+    private void ShowTutorialPage(int pageIndex)
+    {
+        currentTutorialPage = Mathf.Clamp(pageIndex, 0, tutorialPages.Length - 1);
+        
+        // Hide all pages first
+        foreach (GameObject page in tutorialPages)
+        {
+            page.SetActive(false);
+        }
+        
+        // Show current page
+        tutorialPages[currentTutorialPage].SetActive(true);
+        
+        // Update navigation buttons
+        prevTutorialButton.interactable = currentTutorialPage > 0;
+        nextTutorialButton.interactable = currentTutorialPage < tutorialPages.Length - 1;
+        
+        // If last page, show "Close" instead of "Next"
+        if (currentTutorialPage == tutorialPages.Length - 1)
+        {
+            nextTutorialButton.gameObject.SetActive(false);
+            closeTutorialButton.gameObject.SetActive(true);
+        }
+        else
+        {
+            nextTutorialButton.gameObject.SetActive(true);
+            closeTutorialButton.gameObject.SetActive(false);
+        }
+    }
+    
+    private void OpenSettings()
+    {
+        settingsPanel.SetActive(true);
+    }
+    
+    private void CloseSettings()
+    {
+        settingsPanel.SetActive(false);
+        SaveSettings();
+    }
+    
+    public void RestartGame()
+    {
+        // Reset time scale to default before restarting
+        Time.timeScale = 1.0f;
+        
+        // Reload the current scene
+        SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
+    }
+    
+    public void QuitGame()
+    {
+        SaveSettings();
+        
+        // Quit application
+        #if UNITY_EDITOR
+        UnityEditor.EditorApplication.isPlaying = false;
+        #else
+        Application.Quit();
+        #endif
+    }
+    
+    private void OnApplicationQuit()
+    {
+        SaveSettings();
+    }
+    
+    private void OnApplicationPause(bool pause)
+    {
+        if (pause)
+        {
+            SaveSettings();
+        }
+    }
+}

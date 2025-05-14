@@ -1,0 +1,227 @@
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.UI;
+using TMPro;
+
+[System.Serializable]
+public class PointAnimation
+{
+    public int points;
+    public Vector3 startPosition;
+    public Vector3 endPosition;
+    public Color textColor;
+    public float duration = 1.5f;
+    public AnimationCurve moveCurve = AnimationCurve.EaseInOut(0, 0, 1, 1);
+    public AnimationCurve scaleCurve = new AnimationCurve(
+        new Keyframe(0, 0),
+        new Keyframe(0.2f, 1.2f),
+        new Keyframe(0.3f, 1),
+        new Keyframe(0.7f, 1),
+        new Keyframe(1, 0)
+    );
+}
+
+public class GameEffects : MonoBehaviour
+{
+    [Header("Point Animation")]
+    [SerializeField] private GameObject pointTextPrefab;
+    [SerializeField] private Transform pointsParent;
+    [SerializeField] private float pointsAnimationDuration = 1.5f;
+    
+    [Header("Decision Visualization")]
+    [SerializeField] private Animator playerCooperateAnimator;
+    [SerializeField] private Animator playerCheatAnimator;
+    [SerializeField] private Animator opponentCooperateAnimator;
+    [SerializeField] private Animator opponentCheatAnimator;
+    
+    [Header("Background Effects")]
+    [SerializeField] private Animator backgroundAnimator;
+    [SerializeField] private ParticleSystem winParticles;
+    [SerializeField] private ParticleSystem loseParticles;
+    
+    [Header("Round Transitions")]
+    [SerializeField] private Animator roundTransitionAnimator;
+    [SerializeField] private TextMeshProUGUI roundTransitionText;
+    
+    [Header("Decision Effects")]
+    [SerializeField] private ParticleSystem cooperateParticles;
+    [SerializeField] private ParticleSystem cheatParticles;
+    [SerializeField] private AudioClip cooperateSound;
+    [SerializeField] private AudioClip cheatSound;
+    [SerializeField] private AudioSource effectsAudioSource;
+    
+    private List<GameObject> activePointTexts = new List<GameObject>();
+    
+    public void ShowPointsAnimation(int points, Vector3 position, bool isPlayer)
+    {
+        // Create a new point text object
+        GameObject pointTextObj = Instantiate(pointTextPrefab, pointsParent);
+        TextMeshProUGUI pointText = pointTextObj.GetComponent<TextMeshProUGUI>();
+        
+        // Set position and text
+        pointTextObj.transform.position = position;
+        
+        // Set text and color based on points
+        string prefix = points >= 0 ? "+" : "";
+        pointText.text = prefix + points.ToString();
+        
+        // Set color based on points
+        if (points > 0)
+            pointText.color = Color.green;
+        else if (points < 0)
+            pointText.color = Color.red;
+        else
+            pointText.color = Color.yellow;
+        
+        // Start animation
+        StartCoroutine(AnimatePointText(pointTextObj, isPlayer));
+        
+        // Add to active list
+        activePointTexts.Add(pointTextObj);
+    }
+    
+    private IEnumerator AnimatePointText(GameObject textObj, bool isPlayer)
+    {
+        float startTime = Time.time;
+        float endTime = startTime + pointsAnimationDuration;
+        
+        // Get components
+        RectTransform rectTransform = textObj.GetComponent<RectTransform>();
+        TextMeshProUGUI textMesh = textObj.GetComponent<TextMeshProUGUI>();
+        
+        // Starting values
+        Vector3 startPos = rectTransform.position;
+        Vector3 endPos = startPos + new Vector3(0, isPlayer ? 100 : -100, 0);
+        Color startColor = textMesh.color;
+        Color endColor = new Color(startColor.r, startColor.g, startColor.b, 0);
+        
+        // Animate
+        while (Time.time < endTime)
+        {
+            float t = (Time.time - startTime) / pointsAnimationDuration;
+            
+            // Position
+            rectTransform.position = Vector3.Lerp(startPos, endPos, t);
+            
+            // Scale
+            float scale = Mathf.Sin(t * Mathf.PI) * 0.5f + 1.0f;
+            rectTransform.localScale = new Vector3(scale, scale, scale);
+            
+            // Fade out at the end
+            if (t > 0.5f)
+            {
+                float fadeT = (t - 0.5f) * 2;
+                textMesh.color = Color.Lerp(startColor, endColor, fadeT);
+            }
+            
+            yield return null;
+        }
+        
+        // Remove from active list and destroy
+        activePointTexts.Remove(textObj);
+        Destroy(textObj);
+    }
+    
+    public void ShowCooperateEffect(bool isPlayer)
+    {
+        // Play animation
+        if (isPlayer)
+        {
+            playerCooperateAnimator.SetTrigger("Cooperate");
+        }
+        else
+        {
+            opponentCooperateAnimator.SetTrigger("Cooperate");
+        }
+        
+        // Play particles
+        Vector3 particlePosition = isPlayer ? 
+            playerCooperateAnimator.transform.position : 
+            opponentCooperateAnimator.transform.position;
+        
+        ParticleSystem particles = Instantiate(cooperateParticles, particlePosition, Quaternion.identity);
+        
+        // Play sound
+        PlaySound(cooperateSound);
+    }
+    
+    public void ShowCheatEffect(bool isPlayer)
+    {
+        // Play animation
+        if (isPlayer)
+        {
+            playerCheatAnimator.SetTrigger("Cheat");
+        }
+        else
+        {
+            opponentCheatAnimator.SetTrigger("Cheat");
+        }
+        
+        // Play particles
+        Vector3 particlePosition = isPlayer ? 
+            playerCheatAnimator.transform.position : 
+            opponentCheatAnimator.transform.position;
+        
+        ParticleSystem particles = Instantiate(cheatParticles, particlePosition, Quaternion.identity);
+        
+        // Play sound
+        PlaySound(cheatSound);
+    }
+    
+    public void ShowWinEffect()
+    {
+        // Play win animation and particles
+        backgroundAnimator.SetTrigger("Win");
+        winParticles.Play();
+    }
+    
+    public void ShowLoseEffect()
+    {
+        // Play lose animation and particles
+        backgroundAnimator.SetTrigger("Lose");
+        loseParticles.Play();
+    }
+    
+    public void ShowDrawEffect()
+    {
+        // Play draw animation
+        backgroundAnimator.SetTrigger("Draw");
+    }
+    
+    public void ShowRoundTransition(int round, int totalRounds)
+    {
+        // Set text
+        roundTransitionText.text = round + "/" + totalRounds + " Tur";
+        
+        // Play animation
+        roundTransitionAnimator.SetTrigger("Show");
+    }
+    
+    public void ShowOpponentTransition(string opponentName)
+    {
+        // Set text
+        roundTransitionText.text = "Rakip: " + opponentName;
+        
+        // Play animation
+        roundTransitionAnimator.SetTrigger("Show");
+    }
+    
+    private void PlaySound(AudioClip clip)
+    {
+        if (clip != null && effectsAudioSource != null)
+        {
+            effectsAudioSource.PlayOneShot(clip);
+        }
+    }
+    
+    private void OnDestroy()
+    {
+        // Clean up any active point texts
+        foreach (GameObject obj in activePointTexts)
+        {
+            Destroy(obj);
+        }
+        activePointTexts.Clear();
+    }
+}

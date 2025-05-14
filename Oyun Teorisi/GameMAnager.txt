@@ -1,0 +1,390 @@
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.UI;
+using TMPro;
+using System;
+
+public class GameManager : MonoBehaviour
+{
+    [Header("UI References")]
+    public GameObject mainMenuPanel;
+    public GameObject gamePanel;
+    public GameObject resultPanel;
+    public GameObject finalResultPanel;
+
+    [Header("Game UI")]
+    public TextMeshProUGUI opponentNameText;
+    public TextMeshProUGUI roundText;
+    public TextMeshProUGUI scoreText;
+    public TextMeshProUGUI timerText;
+    public TextMeshProUGUI playerScoreText;
+    public TextMeshProUGUI opponentScoreText;
+    public Image opponentImage;
+    public Button cooperateButton;
+    public Button cheatButton;
+    
+    [Header("Result UI")]
+    public TextMeshProUGUI playerChoiceText;
+    public TextMeshProUGUI opponentChoiceText;
+    public TextMeshProUGUI roundScoreText;
+    public TextMeshProUGUI matchScoreText;
+    public Button nextButton;
+    
+    [Header("Final Result UI")]
+    public TextMeshProUGUI finalScoreText;
+    public TextMeshProUGUI rankingText;
+    public Button playAgainButton;
+    
+    [Header("Game Configuration")]
+    public float decisionTime = 10f;
+    public Sprite[] opponentSprites;
+    public string[] opponentNames;
+
+    // Game state
+    private int currentOpponent = 0;
+    private int currentRound = 0;
+    private int totalScore = 0;
+    private int currentMatchScore = 0;
+    private int[] opponentScores = new int[5];
+    private bool playerMadeChoice = false;
+    private bool isCooperate = false;
+    private float timer;
+    private List<MatchResult> matchHistory = new List<MatchResult>();
+
+    // Opponent strategies - will be initialized in Start()
+    private IOpponentStrategy[] opponentStrategies = new IOpponentStrategy[5];
+
+    private void Start()
+    {
+        InitializeOpponentStrategies();
+        SetupButtons();
+        ShowMainMenu();
+    }
+
+    private void InitializeOpponentStrategies()
+    {
+        // Different opponent strategies
+        opponentStrategies[0] = new AlwaysCooperateStrategy();      // First opponent always cooperates
+        opponentStrategies[1] = new AlwaysCheatStrategy();          // Second opponent always cheats
+        opponentStrategies[2] = new TitForTatStrategy();            // Third opponent starts with cooperation, then copies player's last move
+        opponentStrategies[3] = new RandomStrategy();               // Fourth opponent makes random decisions
+        opponentStrategies[4] = new AdaptiveStrategy(matchHistory); // Fifth opponent uses player history to make decisions
+    }
+
+    private void SetupButtons()
+    {
+        cooperateButton.onClick.AddListener(() => MakeChoice(true));
+        cheatButton.onClick.AddListener(() => MakeChoice(false));
+        nextButton.onClick.AddListener(NextRound);
+        playAgainButton.onClick.AddListener(RestartGame);
+    }
+
+    public void StartGame()
+    {
+        mainMenuPanel.SetActive(false);
+        gamePanel.SetActive(true);
+        resultPanel.SetActive(false);
+        finalResultPanel.SetActive(false);
+        
+        totalScore = 0;
+        currentOpponent = 0;
+        currentRound = 1;
+        currentMatchScore = 0;
+        
+        for (int i = 0; i < opponentScores.Length; i++)
+        {
+            opponentScores[i] = 0;
+        }
+        
+        matchHistory.Clear();
+        StartNewRound();
+    }
+
+    private void StartNewRound()
+    {
+        playerMadeChoice = false;
+        timer = decisionTime;
+        
+        // Update UI
+        opponentNameText.text = opponentNames[currentOpponent];
+        opponentImage.sprite = opponentSprites[currentOpponent];
+        roundText.text = "Tur: " + currentRound + "/5";
+        scoreText.text = "Toplam Puan: " + totalScore;
+        playerScoreText.text = "Senin Puanın: " + currentMatchScore;
+        opponentScoreText.text = "Rakip Puanı: " + opponentScores[currentOpponent];
+        
+        // Enable choice buttons
+        cooperateButton.interactable = true;
+        cheatButton.interactable = true;
+    }
+
+    private void MakeChoice(bool cooperate)
+    {
+        playerMadeChoice = true;
+        isCooperate = cooperate;
+        
+        // Disable buttons after choice
+        cooperateButton.interactable = false;
+        cheatButton.interactable = false;
+        
+        // Calculate result immediately instead of waiting for timer
+        CalculateRoundResult();
+    }
+
+    private void CalculateRoundResult()
+    {
+        // Get opponent's choice based on their strategy
+        bool opponentCooperates = opponentStrategies[currentOpponent].MakeDecision(currentRound, isCooperate, matchHistory);
+        
+        // Calculate scores
+        int playerRoundScore = 0;
+        int opponentRoundScore = 0;
+        
+        if (isCooperate && opponentCooperates)
+        {
+            // Both cooperate
+            playerRoundScore = 2;
+            opponentRoundScore = 2;
+        }
+        else if (isCooperate && !opponentCooperates)
+        {
+            // Player cooperates, opponent cheats
+            playerRoundScore = -1;
+            opponentRoundScore = 3;
+        }
+        else if (!isCooperate && opponentCooperates)
+        {
+            // Player cheats, opponent cooperates
+            playerRoundScore = 3;
+            opponentRoundScore = -1;
+        }
+        else // Both cheat
+        {
+            playerRoundScore = 0;
+            opponentRoundScore = 0;
+        }
+        
+        // Update scores
+        totalScore += playerRoundScore;
+        currentMatchScore += playerRoundScore;
+        opponentScores[currentOpponent] += opponentRoundScore;
+        
+        // Record match result for history
+        matchHistory.Add(new MatchResult {
+            Opponent = currentOpponent,
+            Round = currentRound,
+            PlayerCooperated = isCooperate,
+            OpponentCooperated = opponentCooperates,
+            PlayerScore = playerRoundScore,
+            OpponentScore = opponentRoundScore
+        });
+        
+        // Show results
+        ShowRoundResult(opponentCooperates, playerRoundScore);
+    }
+
+    private void ShowRoundResult(bool opponentCooperates, int playerRoundScore)
+    {
+        gamePanel.SetActive(false);
+        resultPanel.SetActive(true);
+        
+        playerChoiceText.text = isCooperate ? "İşbirliği" : "Hile";
+        opponentChoiceText.text = opponentCooperates ? "İşbirliği" : "Hile";
+        roundScoreText.text = "Bu turda kazandığın: " + playerRoundScore + " puan";
+        matchScoreText.text = "Toplam Puanın: " + totalScore;
+    }
+
+    private void NextRound()
+    {
+        currentRound++;
+        
+        if (currentRound > 5)
+        {
+            // Move to next opponent
+            currentOpponent++;
+            currentRound = 1;
+            currentMatchScore = 0;
+            
+            if (currentOpponent >= 5)
+            {
+                // Game over, show final results
+                ShowFinalResults();
+                return;
+            }
+        }
+        
+        resultPanel.SetActive(false);
+        gamePanel.SetActive(true);
+        StartNewRound();
+    }
+
+    private void ShowFinalResults()
+    {
+        resultPanel.SetActive(false);
+        finalResultPanel.SetActive(true);
+        
+        finalScoreText.text = "Toplam Puanın: " + totalScore;
+        
+        // Calculate ranking
+        int rank = 1;
+        for (int i = 0; i < opponentScores.Length; i++)
+        {
+            if (opponentScores[i] > totalScore)
+            {
+                rank++;
+            }
+        }
+        
+        string rankText = rank switch
+        {
+            1 => "1. (Birinci)",
+            2 => "2. (İkinci)",
+            3 => "3. (Üçüncü)",
+            4 => "4. (Dördüncü)",
+            5 => "5. (Beşinci)",
+            _ => "6. (Altıncı)"
+        };
+        
+        rankingText.text = "Sıralamanız: " + rankText;
+    }
+
+    private void RestartGame()
+    {
+        ShowMainMenu();
+    }
+
+    private void ShowMainMenu()
+    {
+        mainMenuPanel.SetActive(true);
+        gamePanel.SetActive(false);
+        resultPanel.SetActive(false);
+        finalResultPanel.SetActive(false);
+    }
+
+    private void Update()
+    {
+        if (gamePanel.activeSelf && !playerMadeChoice)
+        {
+            // Update timer
+            timer -= Time.deltaTime;
+            timerText.text = "Süre: " + Mathf.Ceil(timer).ToString();
+            
+            if (timer <= 0)
+            {
+                // Time's up, make a random choice
+                MakeChoice(UnityEngine.Random.value > 0.5f);
+            }
+        }
+    }
+}
+
+// Data structure to track match history
+public class MatchResult
+{
+    public int Opponent;
+    public int Round;
+    public bool PlayerCooperated;
+    public bool OpponentCooperated;
+    public int PlayerScore;
+    public int OpponentScore;
+}
+
+// Interface for opponent strategies
+public interface IOpponentStrategy
+{
+    bool MakeDecision(int round, bool playerLastMove, List<MatchResult> history);
+}
+
+// Always cooperate strategy
+public class AlwaysCooperateStrategy : IOpponentStrategy
+{
+    public bool MakeDecision(int round, bool playerLastMove, List<MatchResult> history)
+    {
+        return true; // Always cooperate
+    }
+}
+
+// Always cheat strategy
+public class AlwaysCheatStrategy : IOpponentStrategy
+{
+    public bool MakeDecision(int round, bool playerLastMove, List<MatchResult> history)
+    {
+        return false; // Always cheat
+    }
+}
+
+// Tit for Tat strategy - cooperate first, then copy player's last move
+public class TitForTatStrategy : IOpponentStrategy
+{
+    public bool MakeDecision(int round, bool playerLastMove, List<MatchResult> history)
+    {
+        if (round == 1)
+            return true; // Cooperate in the first round
+        
+        // Find the player's last move against this opponent
+        for (int i = history.Count - 1; i >= 0; i--)
+        {
+            if (history[i].Opponent == 2) // This is the TitForTat opponent (index 2)
+            {
+                return history[i].PlayerCooperated;
+            }
+        }
+        
+        return true; // Fallback to cooperation if no history found
+    }
+}
+
+// Random strategy
+public class RandomStrategy : IOpponentStrategy
+{
+    public bool MakeDecision(int round, bool playerLastMove, List<MatchResult> history)
+    {
+        return UnityEngine.Random.value > 0.5f;
+    }
+}
+
+// Adaptive strategy - learns from player behavior
+public class AdaptiveStrategy : IOpponentStrategy
+{
+    private List<MatchResult> history;
+    
+    public AdaptiveStrategy(List<MatchResult> history)
+    {
+        this.history = history;
+    }
+    
+    public bool MakeDecision(int round, bool playerLastMove, List<MatchResult> history)
+    {
+        this.history = history;
+        
+        if (round == 1)
+            return true; // Start with cooperation
+        
+        // Count how many times player has cheated
+        int cheatCount = 0;
+        int totalMoves = 0;
+        
+        foreach (var result in history)
+        {
+            if (result.Opponent == 4) // This is the adaptive opponent (index 4)
+            {
+                totalMoves++;
+                if (!result.PlayerCooperated)
+                    cheatCount++;
+            }
+        }
+        
+        if (totalMoves == 0)
+            return true; // No history yet, cooperate
+        
+        float cheatRatio = (float)cheatCount / totalMoves;
+        
+        // If player cheats more than 50% of the time, cheat as well
+        if (cheatRatio > 0.5f)
+            return false; // Cheat
+        
+        // Otherwise, give them the benefit of the doubt
+        return true; // Cooperate
+    }
+}

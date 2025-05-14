@@ -1,0 +1,263 @@
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using System.Xml;
+using System.IO;
+using TMPro;
+using UnityEngine.UI;
+
+public class LocalizationManager : MonoBehaviour
+{
+    public static LocalizationManager Instance;
+    
+    [Header("Localization Settings")]
+    [SerializeField] private string defaultLanguage = "Turkish"; // Default language
+    [SerializeField] private TextAsset[] languageFiles; // XML language files
+    
+    [Header("UI References")]
+    [SerializeField] private TMP_Dropdown languageDropdown;
+    
+    // Dictionary to hold all localized text
+    private Dictionary<string, Dictionary<string, string>> localizedText = new Dictionary<string, Dictionary<string, string>>();
+    private string currentLanguage;
+    
+    // List of localizable UI elements
+    private List<LocalizedText> localizedTextComponents = new List<LocalizedText>();
+    
+    private void Awake()
+    {
+        // Singleton pattern
+        if (Instance == null)
+        {
+            Instance = this;
+            DontDestroyOnLoad(gameObject);
+            InitializeLocalization();
+        }
+        else
+        {
+            Destroy(gameObject);
+        }
+    }
+    
+    private void Start()
+    {
+        // Set up language dropdown if available
+        if (languageDropdown != null)
+        {
+            languageDropdown.ClearOptions();
+            
+            List<string> options = new List<string>();
+            foreach (var lang in localizedText.Keys)
+            {
+                options.Add(lang);
+            }
+            
+            languageDropdown.AddOptions(options);
+            
+            // Find and select current language
+            int languageIndex = options.IndexOf(currentLanguage);
+            if (languageIndex >= 0)
+            {
+                languageDropdown.value = languageIndex;
+            }
+            
+            languageDropdown.onValueChanged.AddListener(delegate {
+                SetLanguage(options[languageDropdown.value]);
+            });
+        }
+    }
+    
+    private void InitializeLocalization()
+    {
+        // Load saved language or use default
+        currentLanguage = PlayerPrefs.GetString("Language", defaultLanguage);
+        
+        // Load all language files
+        LoadLanguages();
+        
+        // Make sure current language exists, otherwise use default
+        if (!localizedText.ContainsKey(currentLanguage))
+        {
+            if (localizedText.ContainsKey(defaultLanguage))
+            {
+                currentLanguage = defaultLanguage;
+            }
+            else if (localizedText.Count > 0)
+            {
+                // Just use the first available language
+                var enumerator = localizedText.Keys.GetEnumerator();
+                enumerator.MoveNext();
+                currentLanguage = enumerator.Current;
+            }
+        }
+    }
+    
+    private void LoadLanguages()
+    {
+        foreach (TextAsset languageFile in languageFiles)
+        {
+            try
+            {
+                XmlDocument xmlDocument = new XmlDocument();
+                xmlDocument.LoadXml(languageFile.text);
+                
+                XmlNode languageNode = xmlDocument.SelectSingleNode("language");
+                string languageName = languageNode.Attributes["name"].Value;
+                
+                Dictionary<string, string> languageDict = new Dictionary<string, string>();
+                
+                XmlNodeList textNodes = xmlDocument.SelectNodes("language/text");
+                foreach (XmlNode textNode in textNodes)
+                {
+                    string key = textNode.Attributes["key"].Value;
+                    string value = textNode.InnerText;
+                    languageDict[key] = value;
+                }
+                
+                localizedText[languageName] = languageDict;
+                Debug.Log($"Loaded language: {languageName} with {languageDict.Count} entries");
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"Error loading language file {languageFile.name}: {e.Message}");
+            }
+        }
+    }
+    
+    public void SetLanguage(string language)
+    {
+        if (localizedText.ContainsKey(language))
+        {
+            currentLanguage = language;
+            PlayerPrefs.SetString("Language", language);
+            PlayerPrefs.Save();
+            
+            // Update all registered text components
+            UpdateAllLocalizedTexts();
+        }
+        else
+        {
+            Debug.LogWarning($"Language '{language}' not found!");
+        }
+    }
+    
+    public string GetLocalizedText(string key)
+    {
+        // Try to get text in current language
+        if (localizedText.ContainsKey(currentLanguage))
+        {
+            if (localizedText[currentLanguage].ContainsKey(key))
+            {
+                return localizedText[currentLanguage][key];
+            }
+        }
+        
+        // Fall back to default language
+        if (localizedText.ContainsKey(defaultLanguage))
+        {
+            if (localizedText[defaultLanguage].ContainsKey(key))
+            {
+                return localizedText[defaultLanguage][key];
+            }
+        }
+        
+        // Key not found, return the key itself
+        return key;
+    }
+    
+    public void RegisterLocalizedText(LocalizedText localizedTextComponent)
+    {
+        if (!localizedTextComponents.Contains(localizedTextComponent))
+        {
+            localizedTextComponents.Add(localizedTextComponent);
+        }
+    }
+    
+    public void UnregisterLocalizedText(LocalizedText localizedTextComponent)
+    {
+        if (localizedTextComponents.Contains(localizedTextComponent))
+        {
+            localizedTextComponents.Remove(localizedTextComponent);
+        }
+    }
+    
+    private void UpdateAllLocalizedTexts()
+    {
+        foreach (LocalizedText lt in localizedTextComponents)
+        {
+            if (lt != null)
+            {
+                lt.UpdateText();
+            }
+        }
+    }
+    
+    // Fallback method for direct translation of a TextMeshProUGUI component
+    public void TranslateText(TextMeshProUGUI textComponent, string key)
+    {
+        if (textComponent != null)
+        {
+            textComponent.text = GetLocalizedText(key);
+        }
+    }
+    
+    // Fallback method for direct translation of a Text component
+    public void TranslateText(Text textComponent, string key)
+    {
+        if (textComponent != null)
+        {
+            textComponent.text = GetLocalizedText(key);
+        }
+    }
+}
+
+// Helper component to be attached to UI Text elements
+public class LocalizedText : MonoBehaviour
+{
+    [SerializeField] private string textKey;
+    
+    private TextMeshProUGUI tmpText;
+    private Text legacyText;
+    
+    private void Awake()
+    {
+        tmpText = GetComponent<TextMeshProUGUI>();
+        legacyText = GetComponent<Text>();
+    }
+    
+    private void OnEnable()
+    {
+        // Register with localization manager when enabled
+        if (LocalizationManager.Instance != null)
+        {
+            LocalizationManager.Instance.RegisterLocalizedText(this);
+            UpdateText();
+        }
+    }
+    
+    private void OnDisable()
+    {
+        // Unregister when disabled
+        if (LocalizationManager.Instance != null)
+        {
+            LocalizationManager.Instance.UnregisterLocalizedText(this);
+        }
+    }
+    
+    public void UpdateText()
+    {
+        if (string.IsNullOrEmpty(textKey))
+            return;
+        
+        string localizedString = LocalizationManager.Instance.GetLocalizedText(textKey);
+        
+        if (tmpText != null)
+        {
+            tmpText.text = localizedString;
+        }
+        else if (legacyText != null)
+        {
+            legacyText.text = localizedString;
+        }
+    }
+}

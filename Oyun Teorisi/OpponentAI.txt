@@ -1,0 +1,192 @@
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+public class OpponentAI : MonoBehaviour
+{
+    private GameManager gameManager;
+    private UIManager uiManager;
+    
+    [Header("AI Visualization")]
+    [SerializeField] private Animator opponentAnimator;
+    [SerializeField] private GameObject cooperateThoughtBubble;
+    [SerializeField] private GameObject cheatThoughtBubble;
+    [SerializeField] private float thoughtBubbleTime = 1.5f;
+    
+    [Header("Character Expressions")]
+    [SerializeField] private Sprite neutralExpression;
+    [SerializeField] private Sprite happyExpression;
+    [SerializeField] private Sprite angryExpression;
+    [SerializeField] private Sprite thinkingExpression;
+    [SerializeField] private Sprite victoryExpression;
+    [SerializeField] private Sprite defeatExpression;
+    [SerializeField] private SpriteRenderer expressionRenderer;
+    
+    // AI Personality traits for each opponent
+    private OpponentPersonality[] personalities = new OpponentPersonality[5];
+    
+    private void Start()
+    {
+        gameManager = FindObjectOfType<GameManager>();
+        uiManager = FindObjectOfType<UIManager>();
+        
+        InitializePersonalities();
+        HideThoughtBubbles();
+    }
+    
+    private void InitializePersonalities()
+    {
+        // Friendly, always cooperative opponent
+        personalities[0] = new OpponentPersonality
+        {
+            ThinkingTime = 1.0f,
+            ReactionTime = 0.5f,
+            CheatProbability = 0.0f,
+            EmotionalReactions = true,
+            Name = "Dost Deniz"
+        };
+        
+        // Aggressive, always cheating opponent
+        personalities[1] = new OpponentPersonality
+        {
+            ThinkingTime = 0.8f,
+            ReactionTime = 0.3f,
+            CheatProbability = 1.0f,
+            EmotionalReactions = true,
+            Name = "Kurnaz Kemal"
+        };
+        
+        // Tit-for-tat, balanced opponent
+        personalities[2] = new OpponentPersonality
+        {
+            ThinkingTime = 1.5f,
+            ReactionTime = 0.7f,
+            CheatProbability = 0.5f,
+            EmotionalReactions = true,
+            Name = "Aynacı Ayşe"
+        };
+        
+        // Random, unpredictable opponent
+        personalities[3] = new OpponentPersonality
+        {
+            ThinkingTime = 0.5f,
+            ReactionTime = 0.5f,
+            CheatProbability = 0.5f,
+            EmotionalReactions = false,
+            Name = "Rastgele Recep"
+        };
+        
+        // Adaptive, learning opponent
+        personalities[4] = new OpponentPersonality
+        {
+            ThinkingTime = 2.0f,
+            ReactionTime = 1.0f,
+            CheatProbability = 0.3f,
+            EmotionalReactions = true,
+            Name = "Zeki Zeynep"
+        };
+    }
+    
+    public IEnumerator ShowDecisionProcess(int opponentIndex, bool willCooperate)
+    {
+        // Show thinking expression
+        expressionRenderer.sprite = thinkingExpression;
+        opponentAnimator.SetTrigger("Thinking");
+        
+        // Wait for thinking time
+        yield return new WaitForSeconds(personalities[opponentIndex].ThinkingTime);
+        
+        // Show thought bubble
+        if (willCooperate)
+        {
+            cooperateThoughtBubble.SetActive(true);
+        }
+        else
+        {
+            cheatThoughtBubble.SetActive(true);
+        }
+        
+        yield return new WaitForSeconds(thoughtBubbleTime);
+        
+        // Hide thought bubbles
+        HideThoughtBubbles();
+    }
+    
+    public void HideThoughtBubbles()
+    {
+        cooperateThoughtBubble.SetActive(false);
+        cheatThoughtBubble.SetActive(false);
+    }
+    
+    public IEnumerator ShowResultReaction(int opponentIndex, bool playerCooperated, bool opponentCooperated)
+    {
+        OpponentPersonality personality = personalities[opponentIndex];
+        
+        if (!personality.EmotionalReactions)
+        {
+            // For non-emotional opponents, just show neutral expression
+            expressionRenderer.sprite = neutralExpression;
+            yield break;
+        }
+        
+        // Wait for reaction time
+        yield return new WaitForSeconds(personality.ReactionTime);
+        
+        // Show appropriate expression based on result
+        if (playerCooperated && opponentCooperated)
+        {
+            // Both cooperated - happy
+            expressionRenderer.sprite = happyExpression;
+            opponentAnimator.SetTrigger("Happy");
+        }
+        else if (!playerCooperated && opponentCooperated)
+        {
+            // Player cheated, opponent cooperated - sad/angry
+            expressionRenderer.sprite = angryExpression;
+            opponentAnimator.SetTrigger("Angry");
+        }
+        else if (playerCooperated && !opponentCooperated)
+        {
+            // Player cooperated, opponent cheated - victorious
+            expressionRenderer.sprite = victoryExpression;
+            opponentAnimator.SetTrigger("Victory");
+        }
+        else
+        {
+            // Both cheated - neutral/disappointed
+            expressionRenderer.sprite = neutralExpression;
+            opponentAnimator.SetTrigger("Neutral");
+        }
+    }
+    
+    public void ShowFinalResult(int opponentIndex, bool opponentWon)
+    {
+        if (opponentWon)
+        {
+            expressionRenderer.sprite = victoryExpression;
+            opponentAnimator.SetTrigger("Victory");
+        }
+        else
+        {
+            expressionRenderer.sprite = defeatExpression;
+            opponentAnimator.SetTrigger("Defeat");
+        }
+    }
+    
+    public void ResetExpression()
+    {
+        expressionRenderer.sprite = neutralExpression;
+        opponentAnimator.SetTrigger("Neutral");
+    }
+    
+    // Helper class to define opponent personality traits
+    [System.Serializable]
+    public class OpponentPersonality
+    {
+        public float ThinkingTime;
+        public float ReactionTime;
+        public float CheatProbability;
+        public bool EmotionalReactions;
+        public string Name;
+    }
+}

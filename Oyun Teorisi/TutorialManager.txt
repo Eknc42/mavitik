@@ -1,0 +1,262 @@
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.UI;
+using TMPro;
+
+public class TutorialManager : MonoBehaviour
+{
+    [Header("Tutorial UI")]
+    [SerializeField] private GameObject tutorialPanel;
+    [SerializeField] private GameObject[] tutorialPages;
+    [SerializeField] private Button prevButton;
+    [SerializeField] private Button nextButton;
+    [SerializeField] private Button closeButton;
+    [SerializeField] private TextMeshProUGUI pageCounter;
+    
+    [Header("Tutorial Animation")]
+    [SerializeField] private Animator tutorialAnimator;
+    [SerializeField] private float autoProgressDelay = 0.5f;
+    
+    [Header("Demo Elements")]
+    [SerializeField] private GameObject cooperateDemoObject;
+    [SerializeField] private GameObject cheatDemoObject;
+    [SerializeField] private GameObject resultsDemoObject;
+    
+    private int currentPage = 0;
+    private bool tutorialActive = false;
+    private Coroutine demoCoroutine;
+    
+    private void Start()
+    {
+        // Setup buttons
+        if (prevButton != null)
+            prevButton.onClick.AddListener(PreviousPage);
+        
+        if (nextButton != null)
+            nextButton.onClick.AddListener(NextPage);
+        
+        if (closeButton != null)
+            closeButton.onClick.AddListener(CloseTutorial);
+        
+        // Hide tutorial initially
+        if (tutorialPanel != null)
+            tutorialPanel.SetActive(false);
+        
+        // Check if first time playing
+        if (!PlayerPrefs.HasKey("TutorialShown"))
+        {
+            StartCoroutine(ShowTutorialAfterDelay(1.0f));
+        }
+    }
+    
+    private IEnumerator ShowTutorialAfterDelay(float delay)
+    {
+        yield return new WaitForSeconds(delay);
+        ShowTutorial();
+    }
+    
+    public void ShowTutorial()
+    {
+        tutorialActive = true;
+        
+        // Show tutorial panel
+        if (tutorialPanel != null)
+            tutorialPanel.SetActive(true);
+        
+        // Show first page
+        ShowPage(0);
+        
+        // Play intro animation if available
+        if (tutorialAnimator != null)
+            tutorialAnimator.SetTrigger("Show");
+        
+        // Start demo if available
+        StartDemoForCurrentPage();
+    }
+    
+    public void CloseTutorial()
+    {
+        tutorialActive = false;
+        
+        // Stop any running demos
+        if (demoCoroutine != null)
+            StopCoroutine(demoCoroutine);
+        
+        // Hide all demo objects
+        if (cooperateDemoObject != null)
+            cooperateDemoObject.SetActive(false);
+        
+        if (cheatDemoObject != null)
+            cheatDemoObject.SetActive(false);
+        
+        if (resultsDemoObject != null)
+            resultsDemoObject.SetActive(false);
+        
+        // Play exit animation if available
+        if (tutorialAnimator != null)
+        {
+            tutorialAnimator.SetTrigger("Hide");
+            StartCoroutine(DelayedDisable(tutorialPanel, 0.5f));
+        }
+        else
+        {
+            // Just hide the panel
+            if (tutorialPanel != null)
+                tutorialPanel.SetActive(false);
+        }
+        
+        // Mark tutorial as shown
+        PlayerPrefs.SetInt("TutorialShown", 1);
+        PlayerPrefs.Save();
+    }
+    
+    private IEnumerator DelayedDisable(GameObject obj, float delay)
+    {
+        yield return new WaitForSeconds(delay);
+        if (obj != null)
+            obj.SetActive(false);
+    }
+    
+    public void NextPage()
+    {
+        if (currentPage < tutorialPages.Length - 1)
+        {
+            ShowPage(currentPage + 1);
+        }
+        else
+        {
+            CloseTutorial();
+        }
+    }
+    
+    public void PreviousPage()
+    {
+        if (currentPage > 0)
+        {
+            ShowPage(currentPage - 1);
+        }
+    }
+    
+    private void ShowPage(int pageIndex)
+    {
+        // Stop any running demos
+        if (demoCoroutine != null)
+            StopCoroutine(demoCoroutine);
+        
+        // Hide all pages
+        for (int i = 0; i < tutorialPages.Length; i++)
+        {
+            if (tutorialPages[i] != null)
+                tutorialPages[i].SetActive(false);
+        }
+        
+        // Show the selected page
+        currentPage = Mathf.Clamp(pageIndex, 0, tutorialPages.Length - 1);
+        if (tutorialPages[currentPage] != null)
+            tutorialPages[currentPage].SetActive(true);
+        
+        // Update navigation buttons
+        if (prevButton != null)
+            prevButton.interactable = currentPage > 0;
+        
+        if (nextButton != null)
+            nextButton.gameObject.SetActive(currentPage < tutorialPages.Length - 1);
+        
+        if (closeButton != null)
+            closeButton.gameObject.SetActive(currentPage == tutorialPages.Length - 1);
+        
+        // Update page counter if available
+        if (pageCounter != null)
+            pageCounter.text = (currentPage + 1) + "/" + tutorialPages.Length;
+        
+        // Start demo for current page
+        StartDemoForCurrentPage();
+    }
+    
+    private void StartDemoForCurrentPage()
+    {
+        // Reset all demo objects
+        if (cooperateDemoObject != null)
+            cooperateDemoObject.SetActive(false);
+        
+        if (cheatDemoObject != null)
+            cheatDemoObject.SetActive(false);
+        
+        if (resultsDemoObject != null)
+            resultsDemoObject.SetActive(false);
+        
+        // Start appropriate demo based on page index
+        switch (currentPage)
+        {
+            case 1: // Cooperate explanation
+                if (cooperateDemoObject != null)
+                    demoCoroutine = StartCoroutine(CooperateDemoRoutine());
+                break;
+            
+            case 2: // Cheat explanation
+                if (cheatDemoObject != null)
+                    demoCoroutine = StartCoroutine(CheatDemoRoutine());
+                break;
+            
+            case 3: // Results explanation
+                if (resultsDemoObject != null)
+                    demoCoroutine = StartCoroutine(ResultsDemoRoutine());
+                break;
+        }
+    }
+    
+    private IEnumerator CooperateDemoRoutine()
+    {
+        while (tutorialActive && currentPage == 1)
+        {
+            cooperateDemoObject.SetActive(true);
+            
+            // Play cooperate animation if available
+            Animator cooperateAnimator = cooperateDemoObject.GetComponent<Animator>();
+            if (cooperateAnimator != null)
+                cooperateAnimator.SetTrigger("Demo");
+            
+            yield return new WaitForSeconds(3.0f);
+            
+            cooperateDemoObject.SetActive(false);
+            yield return new WaitForSeconds(1.0f);
+        }
+    }
+    
+    private IEnumerator CheatDemoRoutine()
+    {
+        while (tutorialActive && currentPage == 2)
+        {
+            cheatDemoObject.SetActive(true);
+            
+            // Play cheat animation if available
+            Animator cheatAnimator = cheatDemoObject.GetComponent<Animator>();
+            if (cheatAnimator != null)
+                cheatAnimator.SetTrigger("Demo");
+            
+            yield return new WaitForSeconds(3.0f);
+            
+            cheatDemoObject.SetActive(false);
+            yield return new WaitForSeconds(1.0f);
+        }
+    }
+    
+    private IEnumerator ResultsDemoRoutine()
+    {
+        while (tutorialActive && currentPage == 3)
+        {
+            resultsDemoObject.SetActive(true);
+            
+            // Play results animation if available
+            Animator resultsAnimator = resultsDemoObject.GetComponent<Animator>();
+            if (resultsAnimator != null)
+                resultsAnimator.SetTrigger("Demo");
+            
+            yield return new WaitForSeconds(5.0f);
+            
+            resultsDemoObject.SetActive(false);
+            yield return new WaitForSeconds(1.0f);
+        }
+    }
+}

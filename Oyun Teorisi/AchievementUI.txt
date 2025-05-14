@@ -1,0 +1,61 @@
+using UnityEngine;
+using UnityEngine.UI;
+using TMPro;
+
+public class AchievementUI : MonoBehaviour
+{
+    [SerializeField] private Image achievementIcon;
+    [SerializeField] private TextMeshProUGUI achievementTitle;
+    [SerializeField] private TextMeshProUGUI achievementDescription;
+    [SerializeField] private GameObject lockedOverlay;
+    [SerializeField] private Image lockedImage;
+    [SerializeField] private Animator unlockAnimator;
+    
+    public void SetAchievement(Achievement achievement)
+    {
+        achievementTitle.text = achievement.Title;
+        achievementDescription.text = achievement.Description;
+        
+        if (achievement.Icon != null)
+        {
+            achievementIcon.sprite = achievement.Icon;
+        }
+        
+        lockedOverlay.SetActive(!achievement.IsUnlocked);
+    }
+    
+    public void PlayUnlockAnimation()
+    {
+        if (unlockAnimator != null)
+        {
+            unlockAnimator.SetTrigger("Unlock");
+        }
+        else
+        {
+            // Simple animation fallback if animator not set
+            StartCoroutine(SimpleUnlockAnimation());
+        }
+    }
+    
+    private System.Collections.IEnumerator SimpleUnlockAnimation()
+    {
+        float duration = 1.0f;
+        float startTime = Time.time;
+        
+        while (Time.time < startTime + duration)
+        {
+            float t = (Time.time - startTime) / duration;
+            
+            if (lockedImage != null)
+            {
+                Color c = lockedImage.color;
+                c.a = 1 - t;
+                lockedImage.color = c;
+            }
+            
+            yield return null;
+        }
+        
+        lockedOverlay.SetActive(false);
+    }
+}

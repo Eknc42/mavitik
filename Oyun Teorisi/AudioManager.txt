@@ -1,0 +1,182 @@
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.Audio;
+
+public class AudioManager : MonoBehaviour
+{
+    public static AudioManager Instance;
+    
+    [Header("Audio Sources")]
+    [SerializeField] private AudioSource musicSource;
+    [SerializeField] private AudioSource sfxSource;
+    [SerializeField] private AudioSource uiSource;
+    
+    [Header("Audio Clips")]
+    [SerializeField] private AudioClip mainMenuMusic;
+    [SerializeField] private AudioClip gameplayMusic;
+    [SerializeField] private AudioClip[] buttonSounds;
+    [SerializeField] private AudioClip cooperateSound;
+    [SerializeField] private AudioClip cheatSound;
+    [SerializeField] private AudioClip successSound;
+    [SerializeField] private AudioClip failureSound;
+    [SerializeField] private AudioClip timerTickSound;
+    [SerializeField] private AudioClip achievementSound;
+    [SerializeField] private AudioClip roundTransitionSound;
+    
+    [Header("Audio Mixer")]
+    [SerializeField] private AudioMixer audioMixer;
+    
+    private void Awake()
+    {
+        if (Instance == null)
+        {
+            Instance = this;
+            DontDestroyOnLoad(gameObject);
+            InitializeAudio();
+        }
+        else
+        {
+            Destroy(gameObject);
+        }
+    }
+    
+    private void InitializeAudio()
+    {
+        // Set up default volumes from settings manager if available
+        if (SettingsManager.Instance != null)
+        {
+            SetMusicVolume(SettingsManager.Instance.MusicVolume);
+            SetSfxVolume(SettingsManager.Instance.SfxVolume);
+        }
+    }
+    
+    public void PlayMainMenuMusic()
+    {
+        PlayMusic(mainMenuMusic, true);
+    }
+    
+    public void PlayGameplayMusic()
+    {
+        PlayMusic(gameplayMusic, true);
+    }
+    
+    public void PlayMusic(AudioClip clip, bool loop = true)
+    {
+        if (musicSource != null && clip != null)
+        {
+            musicSource.clip = clip;
+            musicSource.loop = loop;
+            musicSource.Play();
+        }
+    }
+    
+    public void PlayButtonSound()
+    {
+        if (buttonSounds.Length > 0)
+        {
+            AudioClip randomButtonSound = buttonSounds[Random.Range(0, buttonSounds.Length)];
+            PlayUISound(randomButtonSound);
+        }
+    }
+    
+    public void PlayCooperateSound()
+    {
+        PlaySfx(cooperateSound);
+    }
+    
+    public void PlayCheatSound()
+    {
+        PlaySfx(cheatSound);
+    }
+    
+    public void PlaySuccessSound()
+    {
+        PlaySfx(successSound);
+    }
+    
+    public void PlayFailureSound()
+    {
+        PlaySfx(failureSound);
+    }
+    
+    public void PlayTimerTickSound()
+    {
+        PlaySfx(timerTickSound);
+    }
+    
+    public void PlayAchievementSound()
+    {
+        PlaySfx(achievementSound);
+    }
+    
+    public void PlayRoundTransitionSound()
+    {
+        PlaySfx(roundTransitionSound);
+    }
+    
+    public void PlaySfx(AudioClip clip)
+    {
+        if (sfxSource != null && clip != null)
+        {
+            sfxSource.PlayOneShot(clip);
+        }
+    }
+    
+    public void PlayUISound(AudioClip clip)
+    {
+        if (uiSource != null && clip != null)
+        {
+            uiSource.PlayOneShot(clip);
+        }
+    }
+    
+    public void SetMusicVolume(float volume)
+    {
+        if (musicSource != null)
+        {
+            musicSource.volume = volume;
+        }
+        
+        if (audioMixer != null)
+        {
+            float volumeDB = Mathf.Log10(Mathf.Max(0.0001f, volume)) * 20;
+            audioMixer.SetFloat("MusicVolume", volumeDB);
+        }
+    }
+    
+    public void SetSfxVolume(float volume)
+    {
+        if (sfxSource != null)
+        {
+            sfxSource.volume = volume;
+        }
+        
+        if (uiSource != null)
+        {
+            uiSource.volume = volume;
+        }
+        
+        if (audioMixer != null)
+        {
+            float volumeDB = Mathf.Log10(Mathf.Max(0.0001f, volume)) * 20;
+            audioMixer.SetFloat("SFXVolume", volumeDB);
+        }
+    }
+    
+    public void PauseSounds()
+    {
+        if (musicSource != null && musicSource.isPlaying)
+        {
+            musicSource.Pause();
+        }
+    }
+    
+    public void ResumeSounds()
+    {
+        if (musicSource != null && !musicSource.isPlaying)
+        {
+            musicSource.UnPause();
+        }
+    }
+}
