@@ -1,0 +1,717 @@
+package com.example.shapeshifter;
+
+import android.content.Context;
+import android.content.SharedPreferences;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.Path;
+import android.media.AudioManager;
+import android.media.MediaPlayer;
+import android.media.SoundPool;
+import android.view.MotionEvent;
+import android.view.SurfaceHolder;
+import android.view.SurfaceView;
+
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.Random;
+
+public class GameView extends SurfaceView implements SurfaceHolder.Callback {
+
+    // Oyun durumları için enum
+    enum GameState {
+        MENU,
+        PLAYING,
+        GAME_OVER
+    }
+
+    private GameState gameState;
+    private Context context;
+    private MainThread thread;
+    private Player player;
+    private ArrayList<Obstacle> obstacles;
+    private Paint paint;
+    private Random random;
+    private int screenWidth, screenHeight;
+    private int score;
+    private int highScore;
+    private long gameOverTime;
+    private boolean isPlaying;
+    private float gameSpeed;
+    private long lastObstacleTime;
+    private long obstacleInterval;
+    private long lastSpeedIncrease;
+    private long slowdownEndTime;
+    private boolean isSlowdown;
+    private float scoreMultiplier;
+    private long scoreMultiplierEndTime;
+
+    // Engel boşluğu için değişkenler
+    private float initialOpeningHeight;
+    private float minOpeningHeight;
+    private float currentOpeningHeight;
+    private float openingHeightDecreaseRate;
+
+    // Engeller arası mesafeyi artırmak için değişken
+    private long minObstacleInterval;
+
+    // Şekiller için renk dizisi
+    private int[] shapeColors;
+
+    // Ses efektleri
+    private MediaPlayer backgroundMusic;
+    private SoundPool soundPool;
+    private int successSoundId;
+    private int gameOverSoundId;
+    private boolean soundLoaded = false;
+
+    // SharedPreferences
+    private SharedPreferences sharedPreferences;
+    private SharedPreferences.Editor editor;
+
+    public GameView(Context context) {
+        super(context);
+        this.context = context;
+
+        // Surface holder için callback ayarla
+        getHolder().addCallback(this);
+
+        thread = new MainThread(getHolder(), this);
+
+        paint = new Paint();
+
+        // Şekiller için renkler tanımla
+        shapeColors = new int[]{
+                Color.RED,    // Kare için kırmızı
+                Color.GREEN,  // Üçgen için yeşil
+                Color.BLUE,   // Daire için mavi
+                Color.YELLOW  // Dikdörtgen için sarı
+        };
+
+        // SharedPreferences başlat
+        sharedPreferences = context.getSharedPreferences("GamePrefs", Context.MODE_PRIVATE);
+        editor = sharedPreferences.edit();
+        highScore = sharedPreferences.getInt("highScore", 0);
+
+        // Oyun durumunu ana menü olarak başlat
+        gameState = GameState.MENU;
+        isPlaying = false;
+
+        // Ses sistemi başlat
+        initAudio();
+
+        setFocusable(true);
+    }
+
+    private void initAudio() {
+        // SoundPool oluştur (API 21+ için yeni yöntem)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
+            soundPool = new SoundPool.Builder()
+                    .setMaxStreams(5)
+                    .build();
+        } else {
+            soundPool = new SoundPool(5, AudioManager.STREAM_MUSIC, 0);
+        }
+
+        // Ses yükleme listener'ı
+        soundPool.setOnLoadCompleteListener(new SoundPool.OnLoadCompleteListener() {
+            @Override
+            public void onLoadComplete(SoundPool soundPool, int sampleId, int status) {
+                soundLoaded = true;
+            }
+        });
+
+        // Ses dosyalarını yükle - Bunları raw klasörüne yüklemelisiniz
+        try {
+            // R.raw yerine kendi ses dosyalarınızı kullanın
+            successSoundId = soundPool.load(getContext(), R.raw.success, 1);
+            gameOverSoundId = soundPool.load(getContext(), R.raw.gameover, 1);
+        } catch (Exception e) {
+            e.printStackTrace();
+            // Ses dosyaları bulunamazsa varsayılan değerleri kullan
+            successSoundId = 0;
+            gameOverSoundId = 0;
+        }
+
+        // Arka plan müziği için MediaPlayer
+        try {
+            // Kendi arka plan müziğinizi R.raw.background_music şeklinde ekleyin
+            backgroundMusic = MediaPlayer.create(getContext(), R.raw.background_music);
+            if (backgroundMusic != null) {
+                backgroundMusic.setLooping(true);
+                backgroundMusic.setVolume(0.1f, 0.1f); // Düşük ses seviyesi
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+            // Arka plan müziği bulunamazsa null olarak bırak
+            backgroundMusic = null;
+        }
+    }
+
+    private void playBackgroundMusic() {
+        if (backgroundMusic != null && !backgroundMusic.isPlaying()) {
+            try {
+                backgroundMusic.start();
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    private void pauseBackgroundMusic() {
+        if (backgroundMusic != null && backgroundMusic.isPlaying()) {
+            try {
+                backgroundMusic.pause();
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    private void playSuccessSound() {
+        if (soundPool != null && soundLoaded && successSoundId != 0) {
+            soundPool.play(successSoundId, 0.3f, 0.3f, 1, 0, 1);
+        }
+    }
+
+    private void playGameOverSound() {
+        if (soundPool != null && soundLoaded && gameOverSoundId != 0) {
+            soundPool.play(gameOverSoundId, 0.5f, 0.5f, 1, 0, 1);
+        }
+    }
+
+    private void startGame() {
+        // Oyun başlatılırken reset et
+        reset();
+        gameState = GameState.PLAYING;
+        isPlaying = true;
+        playBackgroundMusic();
+    }
+
+    private void reset() {
+        random = new Random();
+        player = new Player();
+
+        // Oyuncunun ekranın ortasında başlamasını sağla
+        if (screenWidth > 0 && screenHeight > 0) {
+            player.x = screenWidth / 4;
+            player.y = screenHeight / 2;
+        }
+
+        obstacles = new ArrayList<>();
+        score = 0;
+        gameSpeed = 10.0f;
+        lastObstacleTime = System.currentTimeMillis();
+        // Engeller arası mesafeyi artır
+        obstacleInterval = 3000; // 3 saniye (2 saniye yerine)
+        minObstacleInterval = 1000; // Minimum 1 saniye
+        lastSpeedIncrease = System.currentTimeMillis();
+        isSlowdown = false;
+        scoreMultiplier = 1.0f;
+        gameOverTime = 0; // Reset the game over time
+
+        // Engel boşluğu değerlerini ayarla
+        initialOpeningHeight = 300f; // Başlangıçta daha geniş boşluk
+        minOpeningHeight = 120f; // Minimum boşluk yüksekliği
+        currentOpeningHeight = initialOpeningHeight;
+        openingHeightDecreaseRate = 0.2f; // Her engelde azaltılacak miktar
+
+        // Arka plan müziğini durdur
+        pauseBackgroundMusic();
+    }
+
+    @Override
+    public void surfaceCreated(SurfaceHolder holder) {
+        // Thread'i başlat
+        thread = new MainThread(getHolder(), this);
+        thread.setRunning(true);
+        thread.start();
+    }
+
+    @Override
+    public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
+        screenWidth = width;
+        screenHeight = height;
+
+        // Oyuncu başlangıç pozisyonunu ayarla
+        if (player != null) {
+            player.x = screenWidth / 4;
+            player.y = screenHeight / 2;
+        }
+    }
+
+    @Override
+    public void surfaceDestroyed(SurfaceHolder holder) {
+        boolean retry = true;
+        while (retry) {
+            try {
+                thread.setRunning(false);
+                thread.join();
+                retry = false;
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    public void update() {
+        if (gameState != GameState.PLAYING) return;
+
+        // Oyuncu güncellemesi
+        player.update();
+
+        // Özel güçleri kontrol et
+        checkPowerups();
+
+        // Engelleri oluştur
+        createObstacles();
+
+        // Engelleri güncelle ve çarpışmaları kontrol et
+        updateObstacles();
+
+        // Oyun hızını artır
+        increaseGameSpeed();
+
+        // Boşluk yüksekliğini azalt
+        decreaseOpeningHeight();
+
+        // Yüksek skoru güncelle
+        if (score > highScore) {
+            highScore = score;
+            editor.putInt("highScore", highScore);
+            editor.apply();
+        }
+    }
+
+    private void checkPowerups() {
+        // Yavaşlatıcı kontrolü
+        if (isSlowdown && System.currentTimeMillis() > slowdownEndTime) {
+            isSlowdown = false;
+            gameSpeed *= 2; // Hızı normale döndür
+        }
+
+        // Puan çarpanı kontrolü
+        if (scoreMultiplier > 1.0f && System.currentTimeMillis() > scoreMultiplierEndTime) {
+            scoreMultiplier = 1.0f;
+        }
+    }
+
+    private void createObstacles() {
+        long now = System.currentTimeMillis();
+
+        // Yeni engel oluşturma zamanı geldi mi?
+        if (now - lastObstacleTime > obstacleInterval) {
+            // Rastgele bir engel şekli seç
+            int shapeType = random.nextInt(4); // 0: Kare, 1: Üçgen, 2: Daire, 3: Dikdörtgen
+
+            // Yeni engel oluştururken mevcut boşluk yüksekliğini kullan
+            Obstacle obstacle = new Obstacle(screenWidth, screenHeight, shapeType, currentOpeningHeight);
+
+            // Powerup ekle
+            if (random.nextInt(10) == 0) { // %10 ihtimalle
+                obstacle.hasPowerup = true;
+                obstacle.powerupType = random.nextInt(2); // 0: Yavaşlatıcı, 1: Puan çarpanı
+            }
+
+            obstacles.add(obstacle);
+            lastObstacleTime = now;
+
+            // Aralığı kısalt (minimum değere kadar)
+            obstacleInterval = Math.max(minObstacleInterval, obstacleInterval - 10);
+        }
+    }
+
+    private void decreaseOpeningHeight() {
+        // Oyun zorlaştıkça boşluk yüksekliğini azalt
+        if (currentOpeningHeight > minOpeningHeight) {
+            // Her 5 puanda bir boşluğu azalt
+            if (score % 5 == 0) {
+                currentOpeningHeight -= openingHeightDecreaseRate;
+                if (currentOpeningHeight < minOpeningHeight) {
+                    currentOpeningHeight = minOpeningHeight;
+                }
+            }
+        }
+    }
+
+    private void updateObstacles() {
+        Iterator<Obstacle> it = obstacles.iterator();
+        while (it.hasNext()) {
+            Obstacle obstacle = it.next();
+
+            // Hız ayarını uygula
+            obstacle.speed = gameSpeed;
+
+            // Engeli güncelle
+            obstacle.update();
+
+            // Ekrandan çıkan engelleri kaldır
+            if (obstacle.x + obstacle.width < 0) {
+                it.remove();
+                continue;
+            }
+
+            // Engelin oyuncuyu geçip geçmediğini kontrol et (puan için)
+            if (!obstacle.passed && obstacle.x + obstacle.width < player.x) {
+                obstacle.passed = true;
+                // Oyuncu doğru şekilde engeli geçtiyse puan ver ve ses çal
+                if (player.currentShape == obstacle.shapeType) {
+                    score += (int)(1 * scoreMultiplier); // Puan sadece burada verilir
+                    playSuccessSound();
+                }
+            }
+
+            // Çarpışma kontrolü
+            if (checkCollision(player, obstacle)) {
+                // Engel açıklığı ile oyuncu şekli uyuşuyor mu?
+                if (player.currentShape != obstacle.shapeType) {
+                    // Çarpışma, oyunu bitir
+                    gameOver();
+                } else {
+                    // Doğru şekille geçiş yaptı, powerup var mı kontrol et
+                    if (obstacle.hasPowerup && obstacle.x < player.x) {
+                        activatePowerup(obstacle.powerupType);
+                        obstacle.hasPowerup = false; // Powerup'ı kullandık
+                    }
+                }
+            }
+        }
+    }
+
+    private void activatePowerup(int type) {
+        if (type == 0) { // Yavaşlatıcı
+            gameSpeed /= 2;
+            isSlowdown = true;
+            slowdownEndTime = System.currentTimeMillis() + 5000; // 5 saniyelik yavaşlatma
+        } else { // Puan çarpanı
+            scoreMultiplier = 2.0f;
+            scoreMultiplierEndTime = System.currentTimeMillis() + 10000; // 10 saniyelik çarpan
+        }
+    }
+
+    private boolean checkCollision(Player player, Obstacle obstacle) {
+        // Basit dikdörtgen çarpışma kontrolü
+        return player.x + player.size > obstacle.x &&
+                player.x < obstacle.x + obstacle.width &&
+                player.y + player.size > obstacle.y &&
+                player.y < obstacle.y + obstacle.height;
+    }
+
+    private void increaseGameSpeed() {
+        long now = System.currentTimeMillis();
+
+        // Her 10 saniyede bir hızı artır
+        if (!isSlowdown && now - lastSpeedIncrease > 10000) {
+            gameSpeed += 0.5f;
+            lastSpeedIncrease = now;
+        }
+    }
+
+    private void gameOver() {
+        gameState = GameState.GAME_OVER;
+        isPlaying = false;
+        pauseBackgroundMusic();
+        playGameOverSound();
+
+        // Handler kullanmak yerine başka bir yaklaşım kullanalım
+        // GameOver durumunu draw metodunda kontrol ederek geri dönelim
+        gameOverTime = System.currentTimeMillis();
+    }
+
+    @Override
+    public void draw(Canvas canvas) {
+        super.draw(canvas);
+        if (canvas != null) {
+            canvas.drawColor(Color.BLACK);
+
+            if (gameState == GameState.MENU) {
+                drawMenu(canvas);
+            } else if (gameState == GameState.PLAYING) {
+                drawGamePlay(canvas);
+            } else if (gameState == GameState.GAME_OVER) {
+                drawGameOver(canvas);
+            }
+        }
+    }
+
+    private void drawMenu(Canvas canvas) {
+        // Başlık
+        paint.setColor(Color.WHITE);
+        paint.setTextSize(100);
+        paint.setTextAlign(Paint.Align.CENTER);
+        canvas.drawText("ShapeShifter", screenWidth / 2, screenHeight / 3, paint);
+
+        // Yüksek skor
+        paint.setTextSize(50);
+        canvas.drawText("En Yüksek Skor: " + highScore, screenWidth / 2, screenHeight / 2, paint);
+
+        // Başlama talimatı
+        paint.setTextSize(40);
+        canvas.drawText("Başlamak için dokunun", screenWidth / 2, screenHeight / 2 + 100, paint);
+
+        // İnstrüksiyon
+        paint.setTextSize(30);
+        canvas.drawText("Dokunarak şeklinizi değiştirin", screenWidth / 2, screenHeight / 2 + 200, paint);
+        canvas.drawText("Engellerin açıklığı ile şekliniz uyuşmalı", screenWidth / 2, screenHeight / 2 + 250, paint);
+
+        // Şekilleri göster
+        float shapeSize = 60f;
+        float startX = screenWidth / 2 - (shapeSize * 4 + 30) / 2;
+        float shapeY = screenHeight / 2 + 350;
+
+        for (int i = 0; i < 4; i++) {
+            paint.setColor(shapeColors[i]);
+            float x = startX + i * (shapeSize + 10);
+
+            switch (i) {
+                case 0: // Kare
+                    canvas.drawRect(x, shapeY, x + shapeSize, shapeY + shapeSize, paint);
+                    break;
+                case 1: // Üçgen
+                    Path trianglePath = new Path();
+                    trianglePath.moveTo(x, shapeY + shapeSize);
+                    trianglePath.lineTo(x + shapeSize / 2, shapeY);
+                    trianglePath.lineTo(x + shapeSize, shapeY + shapeSize);
+                    trianglePath.close();
+                    canvas.drawPath(trianglePath, paint);
+                    break;
+                case 2: // Daire
+                    canvas.drawCircle(x + shapeSize / 2, shapeY + shapeSize / 2, shapeSize / 2, paint);
+                    break;
+                case 3: // Dikdörtgen
+                    canvas.drawRect(x, shapeY + shapeSize / 4, x + shapeSize, shapeY + 3 * shapeSize / 4, paint);
+                    break;
+            }
+        }
+    }
+
+    private void drawGamePlay(Canvas canvas) {
+        // Oyuncuyu çiz
+        player.draw(canvas, paint);
+
+        // Engelleri çiz
+        for (Obstacle obstacle : obstacles) {
+            obstacle.draw(canvas, paint);
+        }
+
+        // Skoru çiz
+        paint.setColor(Color.WHITE);
+        paint.setTextSize(50);
+        paint.setTextAlign(Paint.Align.LEFT);
+        canvas.drawText("Skor: " + score, 50, 80, paint);
+
+        // Yüksek skoru çiz
+        paint.setColor(Color.YELLOW);
+        paint.setTextSize(40);
+        canvas.drawText("En Yüksek: " + highScore, 50, 140, paint);
+
+        // Skoru çarpanı aktifse göster
+        if (scoreMultiplier > 1.0f) {
+            paint.setColor(Color.YELLOW);
+            paint.setTextSize(50);
+            canvas.drawText("x" + scoreMultiplier, 50, 200, paint);
+        }
+
+        // Yavaşlatma aktifse göster
+        if (isSlowdown) {
+            paint.setColor(Color.CYAN);
+            paint.setTextSize(50);
+            canvas.drawText("Yavaşlatma", 50, 260, paint);
+        }
+    }
+
+    private void drawGameOver(Canvas canvas) {
+        paint.setColor(Color.RED);
+        paint.setTextSize(100);
+        paint.setTextAlign(Paint.Align.CENTER);
+        canvas.drawText("Game Over", screenWidth / 2, screenHeight / 2, paint);
+
+        // Final skoru
+        paint.setColor(Color.WHITE);
+        paint.setTextSize(50);
+        canvas.drawText("Skorunuz: " + score, screenWidth / 2, screenHeight / 2 + 100, paint);
+
+        // Ana menüye dönme bilgisi
+        paint.setTextSize(40);
+        canvas.drawText("Ana menüye dönülüyor...", screenWidth / 2, screenHeight / 2 + 200, paint);
+
+        // 2 saniye sonra ana menüye dön
+        if (System.currentTimeMillis() - gameOverTime > 2000) {
+            gameState = GameState.MENU;
+        }
+    }
+
+    @Override
+    public boolean onTouchEvent(MotionEvent event) {
+        if (event.getAction() == MotionEvent.ACTION_DOWN) {
+            if (gameState == GameState.MENU) {
+                // Ana menüdeyse oyunu başlat
+                startGame();
+                return true;
+            } else if (gameState == GameState.PLAYING) {
+                // Oyundaysa şekli değiştir
+                player.changeShape();
+                return true;
+            }
+        }
+        return super.onTouchEvent(event);
+    }
+
+    public void pause() {
+        if (gameState == GameState.PLAYING) {
+            isPlaying = false;
+        }
+        pauseBackgroundMusic();
+        try {
+            thread.setRunning(false);
+            thread.join();
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+    }
+
+    public void resume() {
+        thread = new MainThread(getHolder(), this);
+        thread.setRunning(true);
+        thread.start();
+        if (gameState == GameState.PLAYING) {
+            isPlaying = true;
+            playBackgroundMusic();
+        }
+    }
+
+    // Kaynakları temizle
+    public void cleanup() {
+        if (backgroundMusic != null) {
+            backgroundMusic.release();
+            backgroundMusic = null;
+        }
+        if (soundPool != null) {
+            soundPool.release();
+            soundPool = null;
+        }
+    }
+
+    // Oyuncu sınıfı
+    private class Player {
+        float x, y;
+        float size;
+        int currentShape; // 0: Kare, 1: Üçgen, 2: Daire, 3: Dikdörtgen
+        private int tapCount;
+
+        public Player() {
+            size = 80;
+            currentShape = 0; // Başlangıçta kare
+            tapCount = 0;
+            // Başlangıç değerleri olarak ekran ortasına yakın bir yer ver
+            // Bu değerler reset() metodunda düzgün değerlere güncellenecek
+            x = 0;
+            y = 0;
+        }
+
+        public void update() {
+            // Oyuncu yerçekimi ya da başka fiziksel etkiler altında ise burada güncellenir
+        }
+
+        public void changeShape() {
+            tapCount = (tapCount + 1) % 4;
+            currentShape = tapCount;
+        }
+
+        public void draw(Canvas canvas, Paint paint) {
+            // Oyuncunun şekline göre rengini ayarla
+            paint.setColor(shapeColors[currentShape]);
+
+            switch (currentShape) {
+                case 0: // Kare
+                    canvas.drawRect(x, y, x + size, y + size, paint);
+                    break;
+                case 1: // Üçgen
+                    Path trianglePath = new Path();
+                    trianglePath.moveTo(x, y + size);
+                    trianglePath.lineTo(x + size / 2, y);
+                    trianglePath.lineTo(x + size, y + size);
+                    trianglePath.close();
+                    canvas.drawPath(trianglePath, paint);
+                    break;
+                case 2: // Daire
+                    canvas.drawCircle(x + size / 2, y + size / 2, size / 2, paint);
+                    break;
+                case 3: // Dikdörtgen
+                    canvas.drawRect(x, y + size / 4, x + size, y + 3 * size / 4, paint);
+                    break;
+            }
+        }
+    }
+
+    // Engel sınıfı
+    private class Obstacle {
+        float x, y;
+        float width, height;
+        float speed;
+        int shapeType; // 0: Kare, 1: Üçgen, 2: Daire, 3: Dikdörtgen
+        boolean hasPowerup;
+        int powerupType; // 0: Yavaşlatıcı, 1: Puan çarpanı
+        float openingHeight; // Açıklık yüksekliği
+        boolean passed; // Engelin geçilip geçilmediği
+
+        public Obstacle(int screenWidth, int screenHeight, int shapeType, float openingHeight) {
+            this.shapeType = shapeType;
+            this.openingHeight = openingHeight;
+            width = 100;
+            height = screenHeight;
+            x = screenWidth;
+            y = 0;
+            speed = gameSpeed;
+            hasPowerup = false;
+            passed = false;
+        }
+
+        public void update() {
+            x -= speed;
+        }
+
+        public void draw(Canvas canvas, Paint paint) {
+            // Engeli çiz
+            paint.setColor(Color.GRAY);
+            canvas.drawRect(x, 0, x + width, screenHeight, paint);
+
+            // Engelin açıklığını çiz
+            float openingY = screenHeight / 2 - openingHeight / 2;
+
+            // Şekle uygun açıklık oluştur ve şeklin rengini kullan
+            paint.setColor(shapeColors[shapeType]);
+
+            switch (shapeType) {
+                case 0: // Kare için kare açıklık
+                    canvas.drawRect(x, openingY, x + width, openingY + openingHeight, paint);
+                    break;
+                case 1: // Üçgen için üçgen açıklık
+                    Path trianglePath = new Path();
+                    trianglePath.moveTo(x, openingY + openingHeight);
+                    trianglePath.lineTo(x + width / 2, openingY);
+                    trianglePath.lineTo(x + width, openingY + openingHeight);
+                    trianglePath.close();
+                    canvas.drawPath(trianglePath, paint);
+                    break;
+                case 2: // Daire için daire açıklık
+                    canvas.drawCircle(x + width / 2, openingY + openingHeight / 2, openingHeight / 2, paint);
+                    break;
+                case 3: // Dikdörtgen için dikdörtgen açıklık
+                    canvas.drawRect(x, openingY + openingHeight / 4, x + width, openingY + 3 * openingHeight / 4, paint);
+                    break;
+            }
+
+            // Powerup varsa çiz
+            if (hasPowerup) {
+                if (powerupType == 0) { // Yavaşlatıcı (mavi)
+                    paint.setColor(Color.CYAN);
+                } else { // Puan çarpanı (sarı)
+                    paint.setColor(Color.MAGENTA);
+                }
+                canvas.drawCircle(x + width / 2, openingY + openingHeight / 2, 20, paint);
+            }
+        }
+    }
+}
